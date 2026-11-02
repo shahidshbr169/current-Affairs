@@ -17,7 +17,7 @@ RSS_SOURCES = {
 
 aggregated_news = []
 for category, urls in RSS_SOURCES.items():
-    aggregated_news.append(f"### Category: {category}")
+    aggregated_news.append(f"Category: {category}")
     for url in urls:
         try:
             feed = feedparser.parse(url)
@@ -25,7 +25,7 @@ for category, urls in RSS_SOURCES.items():
                 title = getattr(entry, 'title', 'No Title')
                 link = getattr(entry, 'link', '#')
                 summary = getattr(entry, 'summary', '')
-                aggregated_news.append(f"- **{title}** ({link}): {summary}")
+                aggregated_news.append(f"- Title: {title} | Link: {link} | Summary: {summary}")
         except Exception as e:
             print(f"Error parsing {url}: {e}")
 
@@ -39,7 +39,9 @@ client = OpenAI(
 
 prompt = f"""
 You are an expert current affairs editor. Review the following raw news feeds covering both National and International news. 
-Synthesize them into a clean, well-structured, professional daily current affairs briefing broken down clearly into "International News" and "National News" sections with bullet points, brief context, and direct links if available.
+Synthesize them into a clean, well-structured daily current affairs briefing. 
+
+CRITICAL REQUIREMENT: Output the result STRICTLY as valid HTML elements (such as <h2>, <ul>, <li>, <strong>, and <a> tags) broken down clearly into "International News" and "National News" sections. DO NOT use Markdown tables, markdown code blocks, or raw markdown syntax. Ensure every news item has a clear headline, brief context summary, and an active hyperlink back to the source if available.
 
 Raw News Feeds:
 {raw_news_text}
@@ -48,13 +50,16 @@ Raw News Feeds:
 response = client.chat.completions.create(
     model="openai/gpt-oss-120b",
     messages=[
-        {"role": "system", "content": "You are a professional news editor. (Reasoning effort: medium)"},
+        {"role": "system", "content": "You are a professional news editor who outputs clean HTML content only."},
         {"role": "user", "content": prompt}
     ],
     temperature=0.7
 )
 
 ai_content = response.choices[0].message.content
+
+# Clean up any accidental markdown code-block wrappers if the model outputs them
+ai_content = ai_content.replace("```html", "").replace("```", "").strip()
 
 # 3. Setup Archive and Today's Dates
 current_date_iso = datetime.now().strftime("%Y-%m-%d")
@@ -76,7 +81,9 @@ daily_html = f"""
         h1 {{ color: #1a1a1a; margin-top: 0; }}
         .back-link {{ display: inline-block; margin-bottom: 20px; color: #0066cc; text-decoration: none; }}
         .back-link:hover {{ text-decoration: underline; }}
-        h3 {{ color: #444; border-bottom: 2px solid #f0f0f0; padding-bottom: 6px; margin-top: 30px; }}
+        h2, h3 {{ color: #222; border-bottom: 2px solid #f0f0f0; padding-bottom: 6px; margin-top: 30px; }}
+        ul {{ padding-left: 20px; }}
+        li {{ margin-bottom: 12px; }}
         a {{ color: #0066cc; text-decoration: none; }}
         a:hover {{ text-decoration: underline; }}
     </style>
@@ -87,7 +94,7 @@ daily_html = f"""
         <h1>Daily Current Affairs Briefing</h1>
         <p><strong>Date:</strong> {current_date_formatted}</p>
         <hr style="border:0; border-top:1px solid #eee; margin: 20px 0;">
-        <div>
+        <div class="news-content">
             {ai_content}
         </div>
     </div>
