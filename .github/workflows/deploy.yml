@@ -30,6 +30,8 @@ jobs:
       - name: Run Current Affairs Generator
         env:
           GROQ_API_KEY: ${{ secrets.GROQ_API_KEY }}
+          NEWS_API_KEY: ${{ secrets.NEWS_API_KEY }}
+          CURRENTS_API_KEY: ${{ secrets.CURRENTS_API_KEY }}
         run: |
           python main.py
 
