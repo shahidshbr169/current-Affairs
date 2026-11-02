@@ -166,10 +166,10 @@ print("Successfully received both separate API responses from Groq.")
 
 # Combine both results into the final layout structure
 combined_ai_content = f"""
-<h2>National News & Governance</h2>
+<div class="category-banner">🇮🇳 National News & Governance</div>
 {national_html_content}
 
-<h2>International Relations & Global Affairs</h2>
+<div class="category-banner">🌍 International Relations & Global Affairs</div>
 {international_html_content}
 """
 
@@ -179,7 +179,7 @@ current_date_formatted = datetime.now().strftime("%B %d, %Y")
 
 os.makedirs("public/archive", exist_ok=True)
 
-# Generate Daily HTML Page
+# Generate Daily HTML Page with modern modern styling and highlight rules
 daily_html = f"""
 <!DOCTYPE html>
 <html lang="en">
@@ -188,25 +188,126 @@ daily_html = f"""
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>UPSC Current Affairs - {current_date_formatted}</title>
     <style>
-        body {{ font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; max-width: 900px; margin: 40px auto; padding: 0 20px; line-height: 1.7; color: #2c3e50; background: #f8f9fa; }}
-        .card {{ background: #fff; padding: 45px; border-radius: 10px; box-shadow: 0 4px 15px rgba(0,0,0,0.06); border: 1px solid #e1e8ed; }}
-        h1 {{ color: #1a252f; margin-top: 0; font-size: 2rem; border-bottom: 3px solid #3498db; padding-bottom: 12px; }}
-        .back-link {{ display: inline-block; margin-bottom: 20px; color: #2980b9; text-decoration: none; font-weight: 600; }}
-        .back-link:hover {{ text-decoration: underline; }}
-        h2 {{ color: #2c3e50; margin-top: 40px; border-bottom: 2px solid #eaeaea; padding-bottom: 8px; font-size: 1.4rem; }}
-        ul {{ padding-left: 20px; }}
-        li {{ margin-bottom: 20px; text-align: justify; }}
-        a {{ color: #2980b9; text-decoration: none; font-weight: 600; }}
-        a:hover {{ text-decoration: underline; }}
-        .meta-date {{ color: #7f8c8d; font-size: 0.95rem; margin-bottom: 25px; }}
+        :root {{
+            --primary: #2563eb;
+            --primary-light: #eff6ff;
+            --secondary: #0f172a;
+            --bg-color: #f8fafc;
+            --card-bg: #ffffff;
+            --text-main: #334155;
+            --border-color: #e2e8f0;
+        }}
+        body {{
+            font-family: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+            max-width: 950px;
+            margin: 0 auto;
+            padding: 20px;
+            background-color: var(--bg-color);
+            color: var(--text-main);
+            line-height: 1.7;
+        }}
+        .header-bar {{
+            background: linear-gradient(135deg, #1e293b, #0f172a);
+            color: white;
+            padding: 30px;
+            border-radius: 12px;
+            margin-bottom: 30px;
+            box-shadow: 0 4px 20px rgba(0,0,0,0.08);
+        }}
+        .header-bar h1 {{
+            margin: 0 0 10px 0;
+            font-size: 2rem;
+            letter-spacing: -0.5px;
+        }}
+        .meta-tag {{
+            display: inline-block;
+            background: rgba(255,255,255,0.15);
+            padding: 4px 12px;
+            border-radius: 20px;
+            font-size: 0.85rem;
+            font-weight: 500;
+        }}
+        .back-link {{
+            display: inline-block;
+            margin-bottom: 20px;
+            color: var(--primary);
+            text-decoration: none;
+            font-weight: 600;
+            transition: color 0.2s;
+        }}
+        .back-link:hover {{
+            color: #1d4ed8;
+            text-decoration: underline;
+        }}
+        .card {{
+            background: var(--card-bg);
+            padding: 40px;
+            border-radius: 12px;
+            box-shadow: 0 4px 25px rgba(0,0,0,0.04);
+            border: 1px solid var(--border-color);
+        }}
+        .category-banner {{
+            background: var(--primary-light);
+            color: var(--primary);
+            font-size: 1.25rem;
+            font-weight: 700;
+            padding: 12px 20px;
+            border-radius: 8px;
+            margin-top: 40px;
+            margin-bottom: 20px;
+            border-left: 5px solid var(--primary);
+        }}
+        ul {{
+            padding-left: 0;
+            list-style: none;
+        }}
+        li {{
+            background: #ffffff;
+            border: 1px solid var(--border-color);
+            padding: 24px;
+            border-radius: 8px;
+            margin-bottom: 20px;
+            box-shadow: 0 2px 5px rgba(0,0,0,0.01);
+            transition: transform 0.2s, box-shadow 0.2s;
+        }}
+        li:hover {{
+            transform: translateY(-2px);
+            box-shadow: 0 6px 15px rgba(0,0,0,0.05);
+            border-color: #cbd5e1;
+        }}
+        strong {{
+            color: var(--secondary);
+            font-size: 1.1rem;
+            display: block;
+            margin-bottom: 8px;
+        }}
+        a.source-link {{
+            display: inline-block;
+            margin-top: 12px;
+            background: var(--primary-light);
+            color: var(--primary);
+            padding: 6px 14px;
+            border-radius: 6px;
+            text-decoration: none;
+            font-size: 0.9rem;
+            font-weight: 600;
+            transition: background 0.2s;
+        }}
+        a.source-link:hover {{
+            background: #dbeafe;
+            text-decoration: none;
+        }}
     </style>
 </head>
 <body>
     <div class="card">
         <a class="back-link" href="../index.html">← Back to UPSC Archive Index</a>
-        <h1>UPSC Daily Current Affairs Briefing</h1>
-        <div class="meta-date"><strong>Date:</strong> {current_date_formatted} | Multi-Request Hybrid AI Synthesis</div>
-        <hr style="border:0; border-top:1px solid #eee; margin: 20px 0;">
+        
+        <div class="header-bar">
+            <h1>UPSC Daily Current Affairs Briefing</h1>
+            <div class="meta-tag">📅 {current_date_formatted} &nbsp;|&nbsp; 🏛️ Civil Services Examination Prep</div>
+        </div>
+
         <div class="news-content">
             {combined_ai_content}
         </div>
@@ -219,12 +320,12 @@ daily_filename = f"{current_date_iso}.html"
 with open(f"public/archive/{daily_filename}", "w", encoding="utf-8") as f:
     f.write(daily_html)
 
-# Generate Index Page
+# Generate Index Page with modern clean styles
 archive_files = sorted([f for f in os.listdir("public/archive") if f.endswith(".html")], reverse=True)
 links_html = ""
 for file in archive_files:
     date_str = file.replace(".html", "")
-    links_html += f'<li><a href="archive/{file}">📚 UPSC Dual-API Briefing – <strong>{date_str}</strong></a></li>\n'
+    links_html += f'<li><a href="archive/{file}">📚 UPSC Briefing – <strong>{date_str}</strong> <span style="float:right; color:#64748b; font-size:0.9rem; font-weight:normal;">View Edition →</span></a></li>\n'
 
 index_html = f"""
 <!DOCTYPE html>
@@ -234,20 +335,76 @@ index_html = f"""
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>UPSC Civil Services - Current Affairs Portal</title>
     <style>
-        body {{ font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; max-width: 900px; margin: 40px auto; padding: 0 20px; line-height: 1.6; color: #2c3e50; background: #f8f9fa; }}
-        .container {{ background: #fff; padding: 45px; border-radius: 10px; box-shadow: 0 4px 15px rgba(0,0,0,0.06); border: 1px solid #e1e8ed; }}
-        h1 {{ color: #1a252f; border-bottom: 3px solid #3498db; padding-bottom: 12px; }}
-        ul {{ list-style-type: none; padding: 0; }}
-        li {{ margin: 15px 0; padding: 15px; background: #ffffff; border: 1px solid #e1e8ed; border-left: 5px solid #3498db; border-radius: 6px; transition: transform 0.2s; }}
-        li:hover {{ transform: translateY(-2px); box-shadow: 0 4px 10px rgba(0,0,0,0.04); }}
-        a {{ color: #2980b9; text-decoration: none; font-size: 1.1rem; font-weight: 600; }}
-        .subtitle {{ color: #7f8c8d; font-size: 1rem; margin-bottom: 30px; }}
+        :root {{
+            --primary: #2563eb;
+            --primary-light: #eff6ff;
+            --secondary: #0f172a;
+            --bg-color: #f8fafc;
+            --card-bg: #ffffff;
+            --text-main: #334155;
+            --border-color: #e2e8f0;
+        }}
+        body {{
+            font-family: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+            max-width: 900px;
+            margin: 40px auto;
+            padding: 0 20px;
+            background-color: var(--bg-color);
+            color: var(--text-main);
+            line-height: 1.6;
+        }}
+        .container {{
+            background: var(--card-bg);
+            padding: 45px;
+            border-radius: 12px;
+            box-shadow: 0 4px 25px rgba(0,0,0,0.04);
+            border: 1px solid var(--border-color);
+        }}
+        h1 {{
+            color: var(--secondary);
+            border-bottom: 3px solid var(--primary);
+            padding-bottom: 12px;
+            margin-top: 0;
+        }}
+        ul {{
+            list-style-type: none;
+            padding: 0;
+        }}
+        li {{
+            margin: 15px 0;
+            padding: 18px 20px;
+            background: #ffffff;
+            border: 1px solid var(--border-color);
+            border-left: 5px solid var(--primary);
+            border-radius: 8px;
+            transition: all 0.2s ease;
+        }}
+        li:hover {{
+            transform: translateY(-2px);
+            box-shadow: 0 6px 15px rgba(0,0,0,0.05);
+            border-color: #cbd5e1;
+        }}
+        a {{
+            color: var(--primary);
+            text-decoration: none;
+            font-size: 1.05rem;
+            font-weight: 600;
+            display: block;
+        }}
+        a:hover {{
+            text-decoration: underline;
+        }}
+        .subtitle {{
+            color: #64748b;
+            font-size: 1.05rem;
+            margin-bottom: 30px;
+        }}
     </style>
 </head>
 <body>
     <div class="container">
         <h1>🏛️ UPSC / IAS Current Affairs Portal</h1>
-        <p class="subtitle">Generated using dual-request Groq model orchestration for comprehensive national and international coverage.</p>
+        <p class="subtitle">Structured multi-source intelligence engineered for rigorous civil services preparation.</p>
         <h2>Comprehensive Archive Index</h2>
         <ul>
             {links_html}
@@ -259,4 +416,4 @@ index_html = f"""
 
 with open("public/index.html", "w", encoding="utf-8") as f:
     f.write(index_html)
-print("Dual-API UPSC build script completed successfully.")
+print("Modernized UPSC portal build script completed successfully.")
