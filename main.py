@@ -7,10 +7,10 @@ from openai import OpenAI
 # Configuration parameters
 COUNTRY_CODE = "in"
 GROQ_API_KEY = os.environ.get("GROQ_API_KEY", "")
-NEWS_API_KEY = os.environ.get("NEWS_API_KEY", "")       # From newsapi.org
-CURRENTS_API_KEY = os.environ.get("CURRENTS_API_KEY", "") # From currentsapi.services
+NEWS_API_KEY = os.environ.get("NEWS_API_KEY", "")
+CURRENTS_API_KEY = os.environ.get("CURRENTS_API_KEY", "")
 
-# Dedicated RSS Sources split cleanly into National/Governance and International/World
+# Dedicated RSS Sources split cleanly
 RSS_SOURCES = {
     "National": [
         "https://www.thehindu.com/news/national/feeder/default.rss"
@@ -26,81 +26,57 @@ def fetch_all_sources():
     international_items = []
 
     print("==================================================")
-    print("      FETCHING BALANCED HYBRID DATA SOURCES       ")
+    print("      FETCHING DATA FOR SPLIT API REQUESTS        ")
     print("==================================================")
-    print(f"-> Diagnostic Check: NEWS_API_KEY length -> {len(NEWS_API_KEY)}")
-    print(f"-> Diagnostic Check: CURRENTS_API_KEY length -> {len(CURRENTS_API_KEY)}")
 
     # 1. FETCH FROM NEWSAPI.ORG
     if NEWS_API_KEY and len(NEWS_API_KEY) > 5:
         try:
-            print("\n[NewsAPI] Attempting to fetch top headlines...")
             newsapi_nat_url = f"https://newsapi.org/v2/top-headlines?country={COUNTRY_CODE}&pageSize=5&apiKey={NEWS_API_KEY}"
             res = requests.get(newsapi_nat_url, timeout=10)
-            print(f"[NewsAPI] National HTTP Status: {res.status_code}")
             data = res.json()
             if res.status_code == 200 and data.get("status") == "ok":
-                articles = data.get("articles", [])
-                print(f"[NewsAPI] Successfully grabbed {len(articles)} national articles.")
-                for article in articles:
+                for article in data.get("articles", []):
                     if article.get('title') and article.get('title') != "[Removed]":
                         national_items.append(f"Title: {article.get('title')} | Link: {article.get('url')} | Details: {article.get('description') or ''}")
-            else:
-                print(f"[NewsAPI] Error Response: {data}")
 
             newsapi_intl_url = f"https://newsapi.org/v2/top-headlines?category=general&language=en&pageSize=5&apiKey={NEWS_API_KEY}"
             res_intl = requests.get(newsapi_intl_url, timeout=10)
             data_intl = res_intl.json()
             if res_intl.status_code == 200 and data_intl.get("status") == "ok":
-                articles_intl = data_intl.get("articles", [])
-                print(f"[NewsAPI] Successfully grabbed {len(articles_intl)} international articles.")
-                for article in articles_intl:
+                for article in data_intl.get("articles", []):
                     if article.get('title') and article.get('title') != "[Removed]":
                         international_items.append(f"Title: {article.get('title')} | Link: {article.get('url')} | Details: {article.get('description') or ''}")
         except Exception as e:
             print(f"❌ [NewsAPI Exception]: {e}")
-    else:
-        print("⚠️ [NewsAPI] Skipped: Key appears empty or invalid.")
 
     # 2. FETCH FROM CURRENTS API
     if CURRENTS_API_KEY and len(CURRENTS_API_KEY) > 5:
         try:
-            print("\n[Currents API] Attempting to fetch search data...")
             headers = {"Authorization": CURRENTS_API_KEY}
             cur_nat_url = f"https://api.currentsapi.services/v1/search?country={COUNTRY_CODE.upper()}&language=en&page_size=5"
             cur_res = requests.get(cur_nat_url, headers=headers, timeout=10)
-            print(f"[Currents API] National HTTP Status: {cur_res.status_code}")
             cur_data = cur_res.json()
             if cur_res.status_code == 200 and cur_data.get("status") == "ok":
-                cur_articles = cur_data.get("news", [])
-                print(f"[Currents API] Successfully grabbed {len(cur_articles)} national articles.")
-                for article in cur_articles:
+                for article in cur_data.get("news", []):
                     if article.get('title'):
                         national_items.append(f"Title: {article.get('title')} | Link: {article.get('url')} | Details: {article.get('description') or ''}")
-            else:
-                print(f"[Currents API] Error Response: {cur_data}")
 
             cur_intl_url = "https://api.currentsapi.services/v1/latest-news?language=en&page_size=5"
             cur_intl_res = requests.get(cur_intl_url, headers=headers, timeout=10)
             cur_intl_data = cur_intl_res.json()
             if cur_intl_res.status_code == 200 and cur_intl_data.get("status") == "ok":
-                cur_intl_articles = cur_intl_data.get("news", [])
-                print(f"[Currents API] Successfully grabbed {len(cur_intl_articles)} international articles.")
-                for article in cur_intl_articles:
+                for article in cur_intl_data.get("news", []):
                     if article.get('title'):
                         international_items.append(f"Title: {article.get('title')} | Link: {article.get('url')} | Details: {article.get('description') or ''}")
         except Exception as e:
             print(f"❌ [Currents API Exception]: {e}")
-    else:
-        print("⚠️ [Currents API] Skipped: Key appears empty or invalid.")
 
     # 3. FETCH FROM TRUSTED RSS FEEDS
-    print("\n[RSS Feeds] Fetching from structured RSS streams...")
     for category, urls in RSS_SOURCES.items():
         for url in urls:
             try:
                 feed = feedparser.parse(url)
-                print(f"-> Parsed {len(feed.entries)} entries for [{category}] from {url}")
                 for entry in feed.entries[:8]:
                     title = getattr(entry, 'title', 'No Title')
                     link = getattr(entry, 'link', '#')
@@ -115,11 +91,6 @@ def fetch_all_sources():
             except Exception as e:
                 print(f"❌ Error parsing RSS {url}: {e}")
 
-    print("==================================================")
-    print(f"Total Balanced National Items: {len(national_items)}")
-    print(f"Total Balanced International Items: {len(international_items)}")
-    print("==================================================")
-
     if not national_items:
         national_items.append("Title: Polity, Governance & National Policy Updates | Link: https://www.thehindu.com | Details: Core legislative developments and domestic administrative affairs.")
     if not international_items:
@@ -129,50 +100,86 @@ def fetch_all_sources():
 
 nat_news, intl_news = fetch_all_sources()
 
-raw_news_text = "### National News Inputs (UPSC GS-2 & GS-3 Focus):\n" + "\n".join(nat_news) + "\n\n### International News Inputs (UPSC IR Focus):\n" + "\n".join(intl_news)
+nat_raw_text = "\n".join(nat_news)
+intl_raw_text = "\n".join(intl_news)
 
 client = OpenAI(
     base_url="https://api.groq.com/openai/v1",
     api_key=GROQ_API_KEY,
 )
 
-prompt = f"""
-You are an expert UPSC Civil Services faculty mentor and senior current affairs analyst. Review the following multi-source raw news data carefully. 
-Synthesize them into a rich, thorough, and highly structured daily current affairs briefing tailored for IAS aspirants.
+# ----------------------------------------------------
+# REQUEST 1: NATIONAL NEWS & GOVERNANCE
+# ----------------------------------------------------
+print("Sending dedicated National News request to Groq...")
+nat_prompt = f"""
+You are an expert UPSC Civil Services faculty mentor. Review the following raw national news data carefully. 
+Synthesize them into a thorough, rigorous current affairs section focused strictly on National News & Governance (Polity, Economy, Environment, Internal Security).
 
-CRITICAL INSTRUCTIONS (NO HALLUCINATION & STRICT SECTION BALANCING):
-1. You MUST generate TWO distinct, fully populated main sections:
-   - <h2>National News & Governance</h2> (Containing multiple detailed bullet points mapping to polity, economy, environment, and internal security).
-   - <h2>International Relations & Global Affairs</h2> (Containing multiple detailed bullet points mapping to bilateral ties, global summits, and international organizations).
-2. Do NOT omit either section. Both sections must be comprehensively populated.
-3. For each entry, compose a rigorous, analytical paragraph strictly between 70 to 120 words focusing on context, structural significance, and UPSC syllabus relevance based SOLELY on the provided inputs. Never invent unverified facts.
-4. Output the result STRICTLY as valid HTML elements (such as <h2>, <h3>, <ul>, <li>, <strong>, and <a href="URL" target="_blank"> tags). 
-5. DO NOT use Markdown formatting, markdown tables, or code blocks.
-6. Every list item MUST incorporate the actual source link provided in the input as an active hyperlink anchor text so aspirants can click through to read the full source article.
+CRITICAL INSTRUCTIONS (NO HALLUCINATION):
+1. For each entry, compose a comprehensive, analytical paragraph strictly between 70 to 120 words focusing on context and UPSC syllabus relevance based SOLELY on the provided inputs. Never invent unverified facts.
+2. Output the result STRICTLY as a valid HTML unordered list (<ul><li>...</li></ul>) containing strong headlines and active source links (<a href="URL" target="_blank">Read full article</a>).
+3. DO NOT include <h2> tags or markdown formatting.
 
-Raw Multi-Source Inputs:
-{raw_news_text}
+Raw National Inputs:
+{nat_raw_text}
 """
 
-print("Sending balanced prompt to Groq API (openai/gpt-oss-120b)...")
-response = client.chat.completions.create(
+nat_response = client.chat.completions.create(
     model="openai/gpt-oss-120b",
     messages=[
-        {"role": "system", "content": "An expert UPSC news editor outputting clean HTML content with balanced sections and zero hallucination."},
-        {"role": "user", "content": prompt}
+        {"role": "system", "content": "You are a professional UPSC news editor outputting clean HTML list elements only."},
+        {"role": "user", "content": nat_prompt}
     ],
     temperature=0.7
 )
+national_html_content = nat_response.choices[0].message.content.replace("```html", "").replace("```", "").strip()
 
-ai_content = response.choices[0].message.content
-ai_content = ai_content.replace("```html", "").replace("```", "").strip()
-print("Successfully generated balanced UPSC HTML briefing.")
+# ----------------------------------------------------
+# REQUEST 2: INTERNATIONAL RELATIONS & GLOBAL AFFAIRS
+# ----------------------------------------------------
+print("Sending dedicated International Relations request to Groq...")
+intl_prompt = f"""
+You are an expert UPSC Civil Services faculty mentor. Review the following raw international news data carefully. 
+Synthesize them into a thorough, rigorous current affairs section focused strictly on International Relations & Global Affairs (Bilateral ties, Global Summits, Treaties, Geopolitics).
 
+CRITICAL INSTRUCTIONS (NO HALLUCINATION):
+1. For each entry, compose a comprehensive, analytical paragraph strictly between 70 to 120 words focusing on context and UPSC GS-2 relevance based SOLELY on the provided inputs. Never invent unverified facts.
+2. Output the result STRICTLY as a valid HTML unordered list (<ul><li>...</li></ul>) containing strong headlines and active source links (<a href="URL" target="_blank">Read full article</a>).
+3. DO NOT include <h2> tags or markdown formatting.
+
+Raw International Inputs:
+{intl_raw_text}
+"""
+
+intl_response = client.chat.completions.create(
+    model="openai/gpt-oss-120b",
+    messages=[
+        {"role": "system", "content": "You are a professional UPSC news editor outputting clean HTML list elements only."},
+        {"role": "user", "content": intl_prompt}
+    ],
+    temperature=0.7
+)
+international_html_content = intl_response.choices[0].message.content.replace("```html", "").replace("```", "").strip()
+
+print("Successfully received both separate API responses from Groq.")
+
+# Combine both results into the final layout structure
+combined_ai_content = f"""
+<h2>National News & Governance</h2>
+{national_html_content}
+
+<h2>International Relations & Global Affairs</h2>
+{international_html_content}
+"""
+
+# Setup Archive and Today's Dates
 current_date_iso = datetime.now().strftime("%Y-%m-%d")
 current_date_formatted = datetime.now().strftime("%B %d, %Y")
 
 os.makedirs("public/archive", exist_ok=True)
 
+# Generate Daily HTML Page
 daily_html = f"""
 <!DOCTYPE html>
 <html lang="en">
@@ -186,7 +193,7 @@ daily_html = f"""
         h1 {{ color: #1a252f; margin-top: 0; font-size: 2rem; border-bottom: 3px solid #3498db; padding-bottom: 12px; }}
         .back-link {{ display: inline-block; margin-bottom: 20px; color: #2980b9; text-decoration: none; font-weight: 600; }}
         .back-link:hover {{ text-decoration: underline; }}
-        h2, h3 {{ color: #2c3e50; margin-top: 35px; border-bottom: 2px solid #eaeaea; padding-bottom: 8px; }}
+        h2 {{ color: #2c3e50; margin-top: 40px; border-bottom: 2px solid #eaeaea; padding-bottom: 8px; font-size: 1.4rem; }}
         ul {{ padding-left: 20px; }}
         li {{ margin-bottom: 20px; text-align: justify; }}
         a {{ color: #2980b9; text-decoration: none; font-weight: 600; }}
@@ -198,10 +205,10 @@ daily_html = f"""
     <div class="card">
         <a class="back-link" href="../index.html">← Back to UPSC Archive Index</a>
         <h1>UPSC Daily Current Affairs Briefing</h1>
-        <div class="meta-date"><strong>Date:</strong> {current_date_formatted} | Multi-Source Hybrid Synthesis</div>
+        <div class="meta-date"><strong>Date:</strong> {current_date_formatted} | Multi-Request Hybrid AI Synthesis</div>
         <hr style="border:0; border-top:1px solid #eee; margin: 20px 0;">
         <div class="news-content">
-            {ai_content}
+            {combined_ai_content}
         </div>
     </div>
 </body>
@@ -212,11 +219,12 @@ daily_filename = f"{current_date_iso}.html"
 with open(f"public/archive/{daily_filename}", "w", encoding="utf-8") as f:
     f.write(daily_html)
 
+# Generate Index Page
 archive_files = sorted([f for f in os.listdir("public/archive") if f.endswith(".html")], reverse=True)
 links_html = ""
 for file in archive_files:
     date_str = file.replace(".html", "")
-    links_html += f'<li><a href="archive/{file}">📚 UPSC Briefing – <strong>{date_str}</strong></a></li>\n'
+    links_html += f'<li><a href="archive/{file}">📚 UPSC Dual-API Briefing – <strong>{date_str}</strong></a></li>\n'
 
 index_html = f"""
 <!DOCTYPE html>
@@ -227,7 +235,7 @@ index_html = f"""
     <title>UPSC Civil Services - Current Affairs Portal</title>
     <style>
         body {{ font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; max-width: 900px; margin: 40px auto; padding: 0 20px; line-height: 1.6; color: #2c3e50; background: #f8f9fa; }}
-        .container {{ background: #fff; padding: 45px; border-router: 10px; box-shadow: 0 4px 15px rgba(0,0,0,0.06); border: 1px solid #e1e8ed; }}
+        .container {{ background: #fff; padding: 45px; border-radius: 10px; box-shadow: 0 4px 15px rgba(0,0,0,0.06); border: 1px solid #e1e8ed; }}
         h1 {{ color: #1a252f; border-bottom: 3px solid #3498db; padding-bottom: 12px; }}
         ul {{ list-style-type: none; padding: 0; }}
         li {{ margin: 15px 0; padding: 15px; background: #ffffff; border: 1px solid #e1e8ed; border-left: 5px solid #3498db; border-radius: 6px; transition: transform 0.2s; }}
@@ -239,7 +247,7 @@ index_html = f"""
 <body>
     <div class="container">
         <h1>🏛️ UPSC / IAS Current Affairs Portal</h1>
-        <p class="subtitle">Multi-source hybrid intelligence tuned for civil services exam preparation.</p>
+        <p class="subtitle">Generated using dual-request Groq model orchestration for comprehensive national and international coverage.</p>
         <h2>Comprehensive Archive Index</h2>
         <ul>
             {links_html}
@@ -251,4 +259,4 @@ index_html = f"""
 
 with open("public/index.html", "w", encoding="utf-8") as f:
     f.write(index_html)
-print("Build script completed successfully.")
+print("Dual-API UPSC build script completed successfully.")
