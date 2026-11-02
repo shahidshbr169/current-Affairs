@@ -3,28 +3,30 @@ from datetime import datetime
 import feedparser
 from openai import OpenAI
 
-# 1. Define Free RSS Sources for International & National News
+# 1. Broadened Free RSS Sources for Reliable National & International News
 RSS_SOURCES = {
     "International": [
         "http://feeds.bbci.co.uk/news/world/rss.xml",
         "https://rss.nytimes.com/services/xml/rss/nyt/World.xml"
     ],
-    "National / General": [
-        "https://feeds.feedburner.com/catoday", 
-        "https://rss.nytimes.com/services/xml/rss/nyt/National.xml"
+    "National": [
+        "http://feeds.bbci.co.uk/news/rss.xml", # General/National home feed fallback
+        "https://rss.nytimes.com/services/xml/rss/nyt/US.xml" # Use US or change to your target region (e.g., India/UK feed)
     ]
 }
 
 aggregated_news = []
 for category, urls in RSS_SOURCES.items():
-    aggregated_news.append(f"Category: {category}")
+    aggregated_news.append(f"SECTION: {category}")
     for url in urls:
         try:
             feed = feedparser.parse(url)
-            for entry in feed.entries[:5]:
+            # Take up to 6 items per feed to ensure rich options
+            for entry in feed.entries[:6]:
                 title = getattr(entry, 'title', 'No Title')
                 link = getattr(entry, 'link', '#')
-                summary = getattr(entry, 'summary', '')
+                # Fallback to description if summary is missing
+                summary = getattr(entry, 'summary', '') or getattr(entry, 'description', '')
                 aggregated_news.append(f"- Title: {title} | Link: {link} | Summary: {summary}")
         except Exception as e:
             print(f"Error parsing {url}: {e}")
@@ -38,10 +40,14 @@ client = OpenAI(
 )
 
 prompt = f"""
-You are an expert current affairs editor. Review the following raw news feeds covering both National and International news. 
-Synthesize them into a clean, well-structured daily current affairs briefing. 
+You are an expert news editor. Review the following raw news feeds carefully. 
+Synthesize them into a clean, comprehensive daily current affairs briefing. 
 
-CRITICAL REQUIREMENT: Output the result STRICTLY as valid HTML elements (such as <h2>, <ul>, <li>, <strong>, and <a> tags) broken down clearly into "International News" and "National News" sections. DO NOT use Markdown tables, markdown code blocks, or raw markdown syntax. Ensure every news item has a clear headline, brief context summary, and an active hyperlink back to the source if available.
+CRITICAL INSTRUCTIONS:
+1. You MUST populate both "International News" and "National News" sections. Do not leave any section empty. If an item fits national or regional affairs, place it under National News.
+2. Output the result STRICTLY as valid HTML elements (such as <h2>, <ul>, <li>, <strong>, and <a> tags). 
+3. DO NOT use Markdown tables, markdown code blocks, or raw markdown syntax. 
+4. Every news item must have a clear headline, a brief context summary, and an active hyperlink back to its source URL.
 
 Raw News Feeds:
 {raw_news_text}
@@ -50,7 +56,7 @@ Raw News Feeds:
 response = client.chat.completions.create(
     model="openai/gpt-oss-120b",
     messages=[
-        {"role": "system", "content": "You are a professional news editor who outputs clean HTML content only."},
+        {"role": "system", "content": "You are a professional news editor who outputs clean HTML content only with no empty sections."},
         {"role": "user", "content": prompt}
     ],
     temperature=0.7
