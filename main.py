@@ -1,102 +1,73 @@
 import os
 from datetime import datetime
-import requests
+import feedparser
 from openai import OpenAI
 
-# Configuration
-COUNTRY_CODE = "in"  # Change to your target country (e.g., 'us', 'gb', 'in')
-GROQ_API_KEY = os.environ["GROQ_API_KEY"]
-NEWS_API_KEY = os.environ.get("NEWS_API_KEY", "")       # From newsapi.org
-CURRENTS_API_KEY = os.environ.get("CURRENTS_API_KEY", "") # From currentsapi.services
+# 1. Zero-Limit Reliable RSS Feeds (Guarantees entries populate even without paid API keys)
+RSS_SOURCES = {
+    "National": [
+        "http://feeds.bbci.co.uk/news/rss.xml",
+        "https://rss.nytimes.com/services/xml/rss/nyt/US.xml"
+    ],
+    "International": [
+        "http://feeds.bbci.co.uk/news/world/rss.xml",
+        "https://rss.nytimes.com/services/xml/rss/nyt/World.xml"
+    ]
+}
 
-def fetch_all_news():
+def fetch_rss_news():
     national_items = []
     international_items = []
 
-    # 1. Fetch from NewsAPI.org (Great for general/international top headlines)
-    if NEWS_API_KEY:
-        try:
-            # National top headlines for country
-            newsapi_nat_url = f"https://newsapi.org/v2/top-headlines?country={COUNTRY_CODE}&apiKey={NEWS_API_KEY}"
-            res = requests.get(newsapi_nat_url).json()
-            if res.get("status") == "ok":
-                for article in res.get("articles", [])[:5]:
-                    if article.get('title') and article.get('title') != "[Removed]":
-                        national_items.append(
-                            f"- Title: {article.get('title')} | Link: {article.get('url')} | Summary: {article.get('description') or ''}"
-                        )
-
-            # International top headlines (General world or US/Global sources)
-            newsapi_intl_url = f"https://newsapi.org/v2/top-headlines?category=general&language=en&pageSize=5&apiKey={NEWS_API_KEY}"
-            res_intl = requests.get(newsapi_intl_url).json()
-            if res_intl.get("status") == "ok":
-                for article in res_intl.get("articles", [])[:5]:
-                    if article.get('title') and article.get('title') != "[Removed]":
-                        international_items.append(
-                            f"- Title: {article.get('title')} | Link: {article.get('url')} | Summary: {article.get('description') or ''}"
-                        )
-        except Exception as e:
-            print(f"NewsAPI fetch error: {e}")
-
-    # 2. Fetch from Currents API (Great for deep keyword search and regional coverage)
-    if CURRENTS_API_KEY:
-        try:
-            headers = {"Authorization": CURRENTS_API_KEY}
-            
-            # National search filter
-            cur_nat_url = f"https://api.currentsapi.services/v1/search?country={COUNTRY_CODE}&language=en&page_size=5"
-            cur_nat_res = requests.get(cur_nat_url, headers=headers).json()
-            for article in cur_nat_res.get("news", []):
-                national_items.append(
-                    f"- Title: {article.get('title')} | Link: {article.get('url')} | Summary: {article.get('description') or ''}"
-                )
-
-            # International search filter
-            cur_intl_url = "https://api.currentsapi.services/v1/latest-news?language=en&page_size=5"
-            cur_intl_res = requests.get(cur_intl_url, headers=headers).json()
-            for article in cur_intl_res.get("news", []):
-                international_items.append(
-                    f"- Title: {article.get('title')} | Link: {article.get('url')} | Summary: {article.get('description') or ''}"
-                )
-        except Exception as e:
-            print(f"Currents API fetch error: {e}")
-
-    # Safety Fallbacks if keys are missing or limits are reached
-    if not national_items:
-        national_items.append(f"- Title: Domestic Administrative & Legislative Update | Link: # | Summary: Ongoing national developments, economic shifts, and policy updates in {COUNTRY_CODE.upper()}.")
-    if not international_items:
-        international_items.append("- Title: Global Diplomatic & Trade Overview | Link: # | Summary: International geopolitical reports and cross-border commercial updates.")
+    for category, urls in RSS_SOURCES.items():
+        for url in urls:
+            try:
+                feed = feedparser.parse(url)
+                for entry in feed.entries[:4]: # Grab top entries per feed
+                    title = getattr(entry, 'title', 'No Title')
+                    link = getattr(entry, 'link', '#')
+                    summary = getattr(entry, 'summary', '') or getattr(entry, 'description', '')
+                    
+                    item_text = f"Title: {title} | Source Link: {link} | Details: {summary}"
+                    
+                    if category == "National":
+                        national_items.append(item_text)
+                    else:
+                        international_items.append(item_text)
+            except Exception as e:
+                print(f"Error parsing {url}: {e}")
 
     return national_items, international_items
 
-nat_news, intl_news = fetch_all_news()
+nat_news, intl_news = fetch_rss_news()
 
-raw_news_text = "### National News Data:\n" + "\n".join(nat_news) + "\n\n### International News Data:\n" + "\n".join(intl_news)
+raw_news_text = "### National News Inputs:\n" + "\n".join(nat_news) + "\n\n### International News Inputs:\n" + "\n".join(intl_news)
 
-# Configure Groq Client for openai/gpt-oss-120b
+# 2. Configure Groq Client for openai/gpt-oss-120b
 client = OpenAI(
     base_url="https://api.groq.com/openai/v1",
-    api_key=GROQ_API_KEY,
+    api_key=os.environ["GROQ_API_KEY"],
 )
 
 prompt = f"""
-You are an elite executive news editor. Review the following raw multi-source news data carefully. 
-Synthesize them into a clean, comprehensive, highly professional daily current affairs briefing. 
+You are an elite executive news editor. Review the following raw news inputs carefully. 
+Synthesize them into a professional daily current affairs briefing. 
 
-CRITICAL INSTRUCTIONS:
-1. You MUST thoroughly populate both "International News" and "National News" sections. Do not leave any section empty.
-2. Output the result STRICTLY as valid HTML elements (such as <h2>, <ul>, <li>, <strong>, and <a> tags). 
-3. DO NOT use Markdown tables, markdown code blocks, or raw markdown syntax. 
-4. Every news item must have a clear headline, an insightful executive summary, and an active hyperlink pointing back to its source URL.
+CRITICAL INSTRUCTIONS (NO HALLUCINATION):
+1. Populate both "National News" and "International News" sections thoroughly using ONLY the facts provided in the raw inputs. Do not invent details.
+2. For each news entry, write a comprehensive paragraph containing strictly between 50 to 100 words.
+3. Output the result STRICTLY as valid HTML elements (such as <h2>, <ul>, <li>, <strong>, and <a href="URL"> tags). 
+4. DO NOT use Markdown formatting, markdown tables, or code blocks.
+5. Every list item MUST incorporate the actual source link provided in the input as an active hyperlink anchor text (e.g., wrap the headline or add a direct <a href="LINK">Read full article</a> link) so it is fully clickable.
 
-Raw Multi-Source Data:
+Raw News Inputs:
 {raw_news_text}
 """
 
 response = client.chat.completions.create(
     model="openai/gpt-oss-120b",
     messages=[
-        {"role": "system", "content": "You are a professional news editor who outputs clean HTML content only with no empty sections."},
+        {"role": "system", "content": "You are a professional news editor who outputs clean HTML content only with no hallucinated facts."},
         {"role": "user", "content": prompt}
     ],
     temperature=0.7
@@ -105,13 +76,13 @@ response = client.chat.completions.create(
 ai_content = response.choices[0].message.content
 ai_content = ai_content.replace("```html", "").replace("```", "").strip()
 
-# Setup Archive and Today's Dates
+# 3. Setup Archive and Today's Dates
 current_date_iso = datetime.now().strftime("%Y-%m-%d")
 current_date_formatted = datetime.now().strftime("%B %d, %Y")
 
 os.makedirs("public/archive", exist_ok=True)
 
-# Generate Daily HTML Page
+# 4. Generate Daily HTML Page
 daily_html = f"""
 <!DOCTYPE html>
 <html lang="en">
@@ -127,8 +98,8 @@ daily_html = f"""
         .back-link:hover {{ text-decoration: underline; }}
         h2, h3 {{ color: #222; border-bottom: 2px solid #f0f0f0; padding-bottom: 6px; margin-top: 30px; }}
         ul {{ padding-left: 20px; }}
-        li {{ margin-bottom: 12px; }}
-        a {{ color: #0066cc; text-decoration: none; }}
+        li {{ margin-bottom: 18px; }}
+        a {{ color: #0066cc; text-decoration: none; font-weight: 500; }}
         a:hover {{ text-decoration: underline; }}
     </style>
 </head>
@@ -150,7 +121,7 @@ daily_filename = f"{current_date_iso}.html"
 with open(f"public/archive/{daily_filename}", "w", encoding="utf-8") as f:
     f.write(daily_html)
 
-# Generate Index Page
+# 5. Generate Index Page
 archive_files = sorted([f for f in os.listdir("public/archive") if f.endswith(".html")], reverse=True)
 links_html = ""
 for file in archive_files:
@@ -178,7 +149,7 @@ index_html = f"""
 <body>
     <div class="container">
         <h1>🌍 Daily Current Affairs Portal</h1>
-        <p class="subtitle">Automated daily briefings covering National and International updates, powered by NewsAPI, Currents, Groq & OpenAI open weights.</p>
+        <p class="subtitle">Automated daily briefings covering National and International updates, powered by Groq & OpenAI open weights.</p>
         <h2>Archive Index</h2>
         <ul>
             {links_html}
