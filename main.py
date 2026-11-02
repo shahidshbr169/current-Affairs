@@ -13,11 +13,11 @@ CURRENTS_API_KEY = os.environ.get("CURRENTS_API_KEY", "") # From currentsapi.ser
 # Dedicated RSS Sources split cleanly into National/Governance and International/World
 RSS_SOURCES = {
     "National": [
-        "https://www.thehindu.com/news/national/feeder/default.rss" # The Hindu National Feed
+        "https://www.thehindu.com/news/national/feeder/default.rss"
     ],
     "International": [
-        "https://www.thehindu.com/news/international/feeder/default.rss", # The Hindu International Feed
-        "http://feeds.bbci.co.uk/news/world/rss.xml"                     # BBC World News
+        "https://www.thehindu.com/news/international/feeder/default.rss",
+        "http://feeds.bbci.co.uk/news/world/rss.xml"
     ]
 }
 
@@ -28,63 +28,80 @@ def fetch_all_sources():
     print("==================================================")
     print("      FETCHING BALANCED HYBRID DATA SOURCES       ")
     print("==================================================")
+    print(f"-> Diagnostic Check: NEWS_API_KEY length -> {len(NEWS_API_KEY)}")
+    print(f"-> Diagnostic Check: CURRENTS_API_KEY length -> {len(CURRENTS_API_KEY)}")
 
     # 1. FETCH FROM NEWSAPI.ORG
-    if NEWS_API_KEY:
+    if NEWS_API_KEY and len(NEWS_API_KEY) > 5:
         try:
-            # National Headlines
+            print("\n[NewsAPI] Attempting to fetch top headlines...")
             newsapi_nat_url = f"https://newsapi.org/v2/top-headlines?country={COUNTRY_CODE}&pageSize=5&apiKey={NEWS_API_KEY}"
             res = requests.get(newsapi_nat_url, timeout=10)
+            print(f"[NewsAPI] National HTTP Status: {res.status_code}")
             data = res.json()
             if res.status_code == 200 and data.get("status") == "ok":
-                for article in data.get("articles", []):
+                articles = data.get("articles", [])
+                print(f"[NewsAPI] Successfully grabbed {len(articles)} national articles.")
+                for article in articles:
                     if article.get('title') and article.get('title') != "[Removed]":
                         national_items.append(f"Title: {article.get('title')} | Link: {article.get('url')} | Details: {article.get('description') or ''}")
+            else:
+                print(f"[NewsAPI] Error Response: {data}")
 
-            # International Headlines
             newsapi_intl_url = f"https://newsapi.org/v2/top-headlines?category=general&language=en&pageSize=5&apiKey={NEWS_API_KEY}"
             res_intl = requests.get(newsapi_intl_url, timeout=10)
             data_intl = res_intl.json()
             if res_intl.status_code == 200 and data_intl.get("status") == "ok":
-                for article in data_intl.get("articles", []):
+                articles_intl = data_intl.get("articles", [])
+                print(f"[NewsAPI] Successfully grabbed {len(articles_intl)} international articles.")
+                for article in articles_intl:
                     if article.get('title') and article.get('title') != "[Removed]":
                         international_items.append(f"Title: {article.get('title')} | Link: {article.get('url')} | Details: {article.get('description') or ''}")
         except Exception as e:
             print(f"❌ [NewsAPI Exception]: {e}")
+    else:
+        print("⚠️ [NewsAPI] Skipped: Key appears empty or invalid.")
 
     # 2. FETCH FROM CURRENTS API
-    if CURRENTS_API_KEY:
+    if CURRENTS_API_KEY and len(CURRENTS_API_KEY) > 5:
         try:
+            print("\n[Currents API] Attempting to fetch search data...")
             headers = {"Authorization": CURRENTS_API_KEY}
-            
-            # National Search
             cur_nat_url = f"https://api.currentsapi.services/v1/search?country={COUNTRY_CODE.upper()}&language=en&page_size=5"
             cur_res = requests.get(cur_nat_url, headers=headers, timeout=10)
+            print(f"[Currents API] National HTTP Status: {cur_res.status_code}")
             cur_data = cur_res.json()
             if cur_res.status_code == 200 and cur_data.get("status") == "ok":
-                for article in cur_data.get("news", []):
+                cur_articles = cur_data.get("news", [])
+                print(f"[Currents API] Successfully grabbed {len(cur_articles)} national articles.")
+                for article in cur_articles:
                     if article.get('title'):
                         national_items.append(f"Title: {article.get('title')} | Link: {article.get('url')} | Details: {article.get('description') or ''}")
+            else:
+                print(f"[Currents API] Error Response: {cur_data}")
 
-            # International News
             cur_intl_url = "https://api.currentsapi.services/v1/latest-news?language=en&page_size=5"
             cur_intl_res = requests.get(cur_intl_url, headers=headers, timeout=10)
             cur_intl_data = cur_intl_res.json()
             if cur_intl_res.status_code == 200 and cur_intl_data.get("status") == "ok":
-                for article in cur_intl_data.get("news", []):
+                cur_intl_articles = cur_intl_data.get("news", [])
+                print(f"[Currents API] Successfully grabbed {len(cur_intl_articles)} international articles.")
+                for article in cur_intl_articles:
                     if article.get('title'):
                         international_items.append(f"Title: {article.get('title')} | Link: {article.get('url')} | Details: {article.get('description') or ''}")
         except Exception as e:
             print(f"❌ [Currents API Exception]: {e}")
+    else:
+        print("⚠️ [Currents API] Skipped: Key appears empty or invalid.")
 
-    # 3. FETCH FROM TRUSTED RSS FEEDS (Cleanly Separated)
+    # 3. FETCH FROM TRUSTED RSS FEEDS
     print("\n[RSS Feeds] Fetching from structured RSS streams...")
     for category, urls in RSS_SOURCES.items():
         for url in urls:
             try:
                 feed = feedparser.parse(url)
                 print(f"-> Parsed {len(feed.entries)} entries for [{category}] from {url}")
-                for entry in feed.entries[:8]: # Limit per RSS source to maintain balance
+                for entry in feed.entries[:8]:
                     title = getattr(entry, 'title', 'No Title')
                     link = getattr(entry, 'link', '#')
                     summary = getattr(entry, 'summary', '') or getattr(entry, 'description', '')
@@ -103,7 +120,6 @@ def fetch_all_sources():
     print(f"Total Balanced International Items: {len(international_items)}")
     print("==================================================")
 
-    # Safe fallbacks if lists are empty
     if not national_items:
         national_items.append("Title: Polity, Governance & National Policy Updates | Link: https://www.thehindu.com | Details: Core legislative developments and domestic administrative affairs.")
     if not international_items:
@@ -115,7 +131,6 @@ nat_news, intl_news = fetch_all_sources()
 
 raw_news_text = "### National News Inputs (UPSC GS-2 & GS-3 Focus):\n" + "\n".join(nat_news) + "\n\n### International News Inputs (UPSC IR Focus):\n" + "\n".join(intl_news)
 
-# Configure Groq Client for openai/gpt-oss-120b
 client = OpenAI(
     base_url="https://api.groq.com/openai/v1",
     api_key=GROQ_API_KEY,
@@ -143,7 +158,7 @@ print("Sending balanced prompt to Groq API (openai/gpt-oss-120b)...")
 response = client.chat.completions.create(
     model="openai/gpt-oss-120b",
     messages=[
-        {"role": "system", "content": "You are a professional UPSC news editor who outputs clean HTML content only with balanced sections and zero hallucination."},
+        {"role": "system", "content": "An expert UPSC news editor outputting clean HTML content with balanced sections and zero hallucination."},
         {"role": "user", "content": prompt}
     ],
     temperature=0.7
@@ -153,13 +168,11 @@ ai_content = response.choices[0].message.content
 ai_content = ai_content.replace("```html", "").replace("```", "").strip()
 print("Successfully generated balanced UPSC HTML briefing.")
 
-# Setup Archive and Today's Dates
 current_date_iso = datetime.now().strftime("%Y-%m-%d")
 current_date_formatted = datetime.now().strftime("%B %d, %Y")
 
 os.makedirs("public/archive", exist_ok=True)
 
-# Generate Daily HTML Page
 daily_html = f"""
 <!DOCTYPE html>
 <html lang="en">
@@ -185,7 +198,7 @@ daily_html = f"""
     <div class="card">
         <a class="back-link" href="../index.html">← Back to UPSC Archive Index</a>
         <h1>UPSC Daily Current Affairs Briefing</h1>
-        <div class="meta-date"><strong>Date:</strong> {current_date_formatted} | Balanced Hybrid Synthesis (National & International Sections)</div>
+        <div class="meta-date"><strong>Date:</strong> {current_date_formatted} | Multi-Source Hybrid Synthesis</div>
         <hr style="border:0; border-top:1px solid #eee; margin: 20px 0;">
         <div class="news-content">
             {ai_content}
@@ -199,12 +212,11 @@ daily_filename = f"{current_date_iso}.html"
 with open(f"public/archive/{daily_filename}", "w", encoding="utf-8") as f:
     f.write(daily_html)
 
-# Generate Index Page
 archive_files = sorted([f for f in os.listdir("public/archive") if f.endswith(".html")], reverse=True)
 links_html = ""
 for file in archive_files:
     date_str = file.replace(".html", "")
-    links_html += f'<li><a href="archive/{file}">📚 UPSC Balanced Briefing – <strong>{date_str}</strong></a></li>\n'
+    links_html += f'<li><a href="archive/{file}">📚 UPSC Briefing – <strong>{date_str}</strong></a></li>\n'
 
 index_html = f"""
 <!DOCTYPE html>
@@ -215,7 +227,7 @@ index_html = f"""
     <title>UPSC Civil Services - Current Affairs Portal</title>
     <style>
         body {{ font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; max-width: 900px; margin: 40px auto; padding: 0 20px; line-height: 1.6; color: #2c3e50; background: #f8f9fa; }}
-        .container {{ background: #fff; padding: 45px; border-radius: 10px; box-shadow: 0 4px 15px rgba(0,0,0,0.06); border: 1px solid #e1e8ed; }}
+        .container {{ background: #fff; padding: 45px; border-router: 10px; box-shadow: 0 4px 15px rgba(0,0,0,0.06); border: 1px solid #e1e8ed; }}
         h1 {{ color: #1a252f; border-bottom: 3px solid #3498db; padding-bottom: 12px; }}
         ul {{ list-style-type: none; padding: 0; }}
         li {{ margin: 15px 0; padding: 15px; background: #ffffff; border: 1px solid #e1e8ed; border-left: 5px solid #3498db; border-radius: 6px; transition: transform 0.2s; }}
@@ -227,7 +239,7 @@ index_html = f"""
 <body>
     <div class="container">
         <h1>🏛️ UPSC / IAS Current Affairs Portal</h1>
-        <p class="subtitle">Multi-source hybrid intelligence tuned for comprehensive National and International civil services exam preparation.</p>
+        <p class="subtitle">Multi-source hybrid intelligence tuned for civil services exam preparation.</p>
         <h2>Comprehensive Archive Index</h2>
         <ul>
             {links_html}
@@ -239,4 +251,4 @@ index_html = f"""
 
 with open("public/index.html", "w", encoding="utf-8") as f:
     f.write(index_html)
-print("Balanced UPSC build script completed successfully.")
+print("Build script completed successfully.")
