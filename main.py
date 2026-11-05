@@ -22,6 +22,71 @@ RSS_SOURCES = {
     ]
 }
 
+# ---------------------------------------------------------------------------
+# PROMPTS
+# ---------------------------------------------------------------------------
+SYSTEM_PROMPT = """
+# Role and Objective
+You are an expert Chief Editor and UPSC Civil Services Examination (CSE) Content Architect. You transform raw news items (The Hindu, BBC, and API feeds) into rigorous, high-yield, exam-oriented Current Affairs content for aspirants of the UPSC CSE and other premier Indian exams (State PSCs, RBI Grade B, Bank PO).
+
+# Operational Directives
+1. National News & Governance Pillar:
+   - Focus strictly on policy implications, constitutional articles, Supreme Court judgments, statutory bodies, government schemes, socio-economic reports, and administrative reforms.
+   - Strip away political rhetoric; focus solely on governance, federal structure, and policy outcomes.
+2. International Relations & Global Affairs Pillar:
+   - Focus on bilateral/multilateral groupings (Quad, BRICS, UN, G20), treaties, geopolitical shifts, India's strategic diaspora, and economic diplomacy.
+   - Analyze events through the lens of India's strategic autonomy and national interest.
+3. Deep-Dive Generation:
+   - Explicitly map the item to specific UPSC Syllabus components (e.g., GS Paper II: Statutory, regulatory and various quasi-judicial bodies).
+   - Provide "Prelims Pointers" (facts, data, articles) and "Mains Perspectives" (pros, cons, way forward).
+4. Visual Concentration & Data Highlighting:
+   - Wrap critical quantitative metrics, percentages, timelines, constitutional articles, and statutory figures in <span class="badge">...</span>.
+
+# Accuracy Guardrail
+- Facts about THIS event must come only from the provided title/details. Never invent figures, quotes, names, or dates.
+- Background, constitutional provisions, committees (ARC, Sarkaria, etc.), and way-forward points may use well-established general knowledge, but only when you are confident and they are directly relevant.
+- If the provided details are too thin for a field, write a brief, general, clearly non-event-specific statement rather than fabricating.
+- Output clean HTML only. No markdown, no code fences.
+"""
+
+NATIONAL_SCHEMA = """
+Output STRICTLY this HTML structure:
+<div class="explanation-body">
+    <p><strong>Core Summary:</strong> 2-3 concise sentences on what happened and why it matters.</p>
+    <p><strong>UPSC Syllabus Mapping:</strong> e.g., GS Paper II - Governance, Constitution, Polity</p>
+    <p><strong>Key Data &amp; Stats:</strong> <span class="badge">statistic / percentage / date / article</span> (add more badges if available)</p>
+    <h4>Deep-Dive Analysis</h4>
+    <ul>
+        <li><em>Background:</em> context leading to this news</li>
+        <li><em>Significance:</em> why it matters for administration/society</li>
+        <li><em>Challenges / Critical Analysis:</em> bottlenecks, legal/ethical issues</li>
+        <li><em>Way Forward:</em> expert recommendations / committee suggestions (ARC, Sarkaria, etc.)</li>
+    </ul>
+    <h4>Prelims Pointers</h4>
+    <ul><li>2-4 factual pointers (terms, articles, bodies, data)</li></ul>
+</div>
+"""
+
+INTERNATIONAL_SCHEMA = """
+Output STRICTLY this HTML structure:
+<div class="explanation-body">
+    <p><strong>Core Summary:</strong> 2-3 concise sentences on the international event.</p>
+    <p><strong>UPSC Syllabus Mapping:</strong> e.g., GS Paper II - Bilateral, regional and global groupings involving India</p>
+    <p><strong>Key Data &amp; Agreements:</strong> <span class="badge">treaty / timeline / economic figure</span></p>
+    <h4>Deep-Dive Analysis</h4>
+    <ul>
+        <li><em>Context &amp; Geopolitical Impact:</em> strategic implications for the global order</li>
+        <li><em>Impact on India:</em> direct/indirect strategic, economic, or security consequences</li>
+        <li><em>Way Forward:</em> policy options for India</li>
+    </ul>
+    <h4>Prelims Pointers</h4>
+    <ul><li>2-4 factual pointers (groupings, treaties, locations, data)</li></ul>
+</div>
+"""
+
+PILLAR_SCHEMAS = {"National": NATIONAL_SCHEMA, "International": INTERNATIONAL_SCHEMA}
+
+
 def fetch_all_sources():
     national_items = []
     international_items = []
@@ -98,7 +163,7 @@ def fetch_all_sources():
                     title = getattr(entry, 'title', 'No Title')
                     link = getattr(entry, 'link', '#')
                     summary = getattr(entry, 'summary', '') or getattr(entry, 'description', '')
-                    
+
                     item_obj = {"title": title, "url": link, "desc": summary}
                     if category == "National":
                         national_items.append(item_obj)
@@ -112,7 +177,8 @@ def fetch_all_sources():
     if not international_items:
         international_items.append({"title": "International Relations & Global Geopolitics", "url": "https://www.bbc.com/news/world", "desc": "Transnational agreements, global economic shifts, and diplomatic summits."})
 
-    return national_items[:5], international_items[:5] # Capped at 5 each for optimal generation speed
+    return national_items[:5], international_items[:5]  # Capped at 5 each for optimal generation speed
+
 
 nat_news, intl_news = fetch_all_sources()
 
@@ -121,17 +187,35 @@ client = OpenAI(
     api_key=GROQ_API_KEY,
 )
 
+# Dates first, then numbers/statistics (one pass so matches never overlap)
+BADGE_PATTERN = re.compile(
+    r'\b(20\d{2}|January|February|March|April|May|June|July|August|September|October|November|December)\b'
+    r'|\b(\d+(?:\.\d+)?(?:%|rd|th|st|nd| crore| lakh| billion| million)?)\b'
+)
+
+
 def colorize_text(text):
-    """Automatically wraps dates, numbers, and key locations/places with colorful visual badges for concentration."""
-    # Highlight numbers/statistics (e.g., 50%, Rs. 100 crore, 2026, 3rd)
-    text = re.sub(r'\b(\d+(?:\.\d+)?(?:\%|rd|th|st|nd| crore| lakh| billion| million)?)\b', r'<span class="badge-num">\1</span>', text)
-    # Highlight years/dates
-    text = re.sub(r'\b(20\d{2}|January|February|March|April|May|June|July|August|September|October|November|December)\b', r'<span class="badge-date">\1</span>', text)
-    return text
+    """Wrap dates/numbers in badges, leaving HTML tags and existing .badge spans untouched."""
+    parts = re.split(r'(<[^>]+>)', text)
+    out, in_badge = [], 0
+    for part in parts:
+        if part.startswith('<') and part.endswith('>'):
+            if re.match(r'<span[^>]*class="badge"', part):
+                in_badge += 1
+            elif part == '</span>' and in_badge:
+                in_badge -= 1
+            out.append(part)
+        elif in_badge:
+            out.append(part)
+        else:
+            out.append(BADGE_PATTERN.sub(
+                lambda m: f'<span class="badge-date">{m.group(1)}</span>' if m.group(1)
+                else f'<span class="badge-num">{m.group(2)}</span>', part))
+    return "".join(out)
+
 
 def process_items_with_deep_dives(items, category_name, date_iso_str):
     html_cards = ""
-    detailed_subpages = {}
 
     os.makedirs(f"public/archive/{date_iso_str}", exist_ok=True)
 
@@ -143,42 +227,29 @@ def process_items_with_deep_dives(items, category_name, date_iso_str):
         print(f"Generating full-fledged explanation for [{category_name}] item {idx+1}: {safe_title[:40]}...")
 
         prompt = f"""
-You are an expert UPSC Civil Services faculty mentor. Review the following news entry carefully and generate a rigorous, comprehensive academic explanation tailored for IAS aspirants.
+Process the following raw news item for the {category_name} pillar.
 
 News Title: {safe_title}
 News Details: {safe_desc}
 
-CRITICAL INSTRUCTIONS (NO HALLUCINATION):
-1. Provide a detailed, deep-dive explanation paragraph (strictly 120-180 words) covering the core background, structural context, and direct relevance to the UPSC syllabus (GS-1, GS-2, GS-3, or GS-4) based SOLELY on the provided info. Do not invent unverified facts.
-2. Provide 3 precise bullet points highlighting key terms, stakeholder impact, or exam takeaways.
-3. Output the result STRICTLY as HTML elements using this exact structure:
-   <div class="explanation-body">
-       <p>Detailed explanation paragraph here...</p>
-       <h4>Key UPSC Takeaways:</h4>
-       <ul>
-           <li>Takeaway 1</li>
-           <li>Takeaway 2</li>
-           <li>Takeaway 3</li>
-       </ul>
-   </div>
-DO NOT include markdown code blocks.
+{PILLAR_SCHEMAS[category_name]}
 """
 
         try:
             response = client.chat.completions.create(
                 model="openai/gpt-oss-120b",
                 messages=[
-                    {"role": "system", "content": "You are a professional UPSC faculty member outputting clean HTML content only with zero hallucination."},
+                    {"role": "system", "content": SYSTEM_PROMPT},
                     {"role": "user", "content": prompt}
                 ],
-                temperature=0.7
+                temperature=0.3  # lower = fewer invented facts
             )
             explanation_html = response.choices[0].message.content.replace("```html", "").replace("```", "").strip()
         except Exception as e:
             print(f"Error calling Groq for deep dive: {e}")
             explanation_html = f"<div class='explanation-body'><p>{safe_desc}</p></div>"
 
-        # Colorize summary and explanation
+        # Colorize summary and explanation (safe: skips tags and .badge spans)
         colored_desc = colorize_text(safe_desc)
         explanation_html = colorize_text(explanation_html)
 
@@ -243,6 +314,8 @@ DO NOT include markdown code blocks.
                 .back-link:hover {{ text-decoration: underline; }}
                 .badge-num {{ background: #dbeafe; color: #1e40af; padding: 2px 6px; border-radius: 4px; font-weight: 600; }}
                 .badge-date {{ background: #ffedd5; color: #c2410c; padding: 2px 6px; border-radius: 4px; font-weight: 600; }}
+                .badge {{ background: #fef3c7; color: #92400e; padding: 2px 8px; border-radius: 4px; font-weight: 600; border: 1px solid #fde68a; }}
+                .explanation-body p {{ margin: 10px 0; }}
                 .explanation-body h4 {{ color: var(--primary); margin-top: 25px; }}
                 .explanation-body ul {{ padding-left: 20px; }}
                 .explanation-body li {{ margin-bottom: 10px; }}
@@ -277,6 +350,7 @@ DO NOT include markdown code blocks.
             sf.write(subpage_html)
 
     return html_cards
+
 
 # Setup Archive and Today's Dates
 current_date_iso = datetime.now().strftime("%Y-%m-%d")
@@ -382,10 +456,11 @@ daily_html = f"""
             border-color: #cbd5e1;
         }}
         strong {{ color: var(--secondary); font-size: 1.1rem; display: block; margin-bottom: 8px; }}
-        
+
         /* Colorful Badges for concentration */
         .badge-num {{ background: #dbeafe; color: #1e40af; padding: 2px 6px; border-radius: 4px; font-weight: 600; }}
         .badge-date {{ background: #ffedd5; color: #c2410c; padding: 2px 6px; border-radius: 4px; font-weight: 600; }}
+        .badge {{ background: #fef3c7; color: #92400e; padding: 2px 8px; border-radius: 4px; font-weight: 600; border: 1px solid #fde68a; }}
 
         .btn-readmore {{
             display: inline-block;
@@ -417,7 +492,7 @@ daily_html = f"""
 <body>
     <div class="card">
         <a class="back-link" href="../index.html">← Back to UPSC Archive Index</a>
-        
+
         <div class="header-bar">
             <h1>UPSC Daily Current Affairs Briefing</h1>
             <div class="meta-tag">📅 {current_date_formatted} &nbsp;|&nbsp; 🏛️ Civil Services Examination Prep</div>
