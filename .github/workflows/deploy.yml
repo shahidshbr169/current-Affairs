@@ -6,13 +6,20 @@ on:
   workflow_dispatch: # Allows manual trigger from the GitHub Actions tab
 
 permissions:
-  contents: read
+  contents: write   # needed to commit the generated pages back to the repo
   pages: write
   id-token: write
+
+concurrency:
+  group: current-affairs
+  cancel-in-progress: false
 
 jobs:
   deploy:
     runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
     steps:
       - name: Checkout Repository
         uses: actions/checkout@v4
@@ -34,6 +41,14 @@ jobs:
           CURRENTS_API_KEY: ${{ secrets.CURRENTS_API_KEY }}
         run: |
           python main.py
+
+      - name: Save generated pages to repo (keeps history)
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add -f public
+          git commit -m "Current affairs update $(date -u +%F)" || echo "No changes to commit"
+          git push
 
       - name: Upload Artifact for GitHub Pages
         uses: actions/upload-pages-artifact@v3
