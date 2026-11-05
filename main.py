@@ -1,5 +1,7 @@
 import os
 import re
+import time
+import hashlib
 from datetime import datetime
 import requests
 import feedparser
@@ -86,6 +88,49 @@ Output STRICTLY this HTML structure:
 
 PILLAR_SCHEMAS = {"National": NATIONAL_SCHEMA, "International": INTERNATIONAL_SCHEMA}
 
+# ---------------------------------------------------------------------------
+# STORY SELECTION
+# ---------------------------------------------------------------------------
+NATIONAL_LIMIT = 10        # change these to get more or fewer stories per day
+INTERNATIONAL_LIMIT = 10
+
+UPSC_KEYWORDS = [
+    # polity & governance
+    "supreme court", "high court", "constitution", "article", "parliament", "bill", "act",
+    "amendment", "commission", "tribunal", "election commission", "cabinet", "scheme",
+    "policy", "ministry", "rbi", "sebi", "niti aayog", "census", "reservation", "federal",
+    "governor", "lok sabha", "rajya sabha", "ordinance", "statutory", "regulator",
+    # economy, environment, science
+    "gdp", "inflation", "budget", "gst", "msme", "export", "climate", "biodiversity",
+    "wildlife", "emission", "isro", "satellite", "mission", "agriculture", "msp",
+    "defence", "security", "health", "education", "report", "index",
+    # international relations
+    "india", "un ", "united nations", "quad", "brics", "g20", "asean", "saarc", "wto",
+    "imf", "world bank", "treaty", "bilateral", "summit", "agreement", "sanction",
+    "china", "pakistan", "russia", "united states", "indo-pacific", "nato", "who ",
+]
+
+
+def score_item(item):
+    text = f"{item['title']} {item['desc']}".lower()
+    score = sum(2 for kw in UPSC_KEYWORDS if kw in text)
+    if item.get("trusted"):          # RSS from The Hindu / BBC
+        score += 3
+    return score
+
+
+def select_top(items, limit):
+    """Remove duplicate headlines, rank by UPSC relevance, keep the top `limit`."""
+    seen, unique = set(), []
+    for it in items:
+        key = re.sub(r'\W+', ' ', it['title'].lower()).strip()
+        if not key or key == "no title" or key in seen:
+            continue
+        seen.add(key)
+        unique.append(it)
+    unique.sort(key=score_item, reverse=True)   # stable: ties keep original order
+    return unique[:limit]
+
 
 def fetch_all_sources():
     national_items = []
@@ -98,7 +143,7 @@ def fetch_all_sources():
     # 1. FETCH FROM NEWSAPI.ORG
     if NEWS_API_KEY and len(NEWS_API_KEY) > 5:
         try:
-            newsapi_nat_url = f"https://newsapi.org/v2/top-headlines?country={COUNTRY_CODE}&pageSize=5&apiKey={NEWS_API_KEY}"
+            newsapi_nat_url = f"https://newsapi.org/v2/top-headlines?country={COUNTRY_CODE}&pageSize=20&apiKey={NEWS_API_KEY}"
             res = requests.get(newsapi_nat_url, timeout=10)
             data = res.json()
             if res.status_code == 200 and data.get("status") == "ok":
@@ -110,7 +155,7 @@ def fetch_all_sources():
                             "desc": article.get('description') or ''
                         })
 
-            newsapi_intl_url = f"https://newsapi.org/v2/top-headlines?category=general&language=en&pageSize=5&apiKey={NEWS_API_KEY}"
+            newsapi_intl_url = f"https://newsapi.org/v2/top-headlines?category=general&language=en&pageSize=20&apiKey={NEWS_API_KEY}"
             res_intl = requests.get(newsapi_intl_url, timeout=10)
             data_intl = res_intl.json()
             if res_intl.status_code == 200 and data_intl.get("status") == "ok":
@@ -128,7 +173,7 @@ def fetch_all_sources():
     if CURRENTS_API_KEY and len(CURRENTS_API_KEY) > 5:
         try:
             headers = {"Authorization": CURRENTS_API_KEY}
-            cur_nat_url = f"https://api.currentsapi.services/v1/search?country={COUNTRY_CODE.upper()}&language=en&page_size=5"
+            cur_nat_url = f"https://api.currentsapi.services/v1/search?country={COUNTRY_CODE.upper()}&language=en&page_size=20"
             cur_res = requests.get(cur_nat_url, headers=headers, timeout=10)
             cur_data = cur_res.json()
             if cur_res.status_code == 200 and cur_data.get("status") == "ok":
@@ -140,7 +185,7 @@ def fetch_all_sources():
                             "desc": article.get('description') or ''
                         })
 
-            cur_intl_url = "https://api.currentsapi.services/v1/latest-news?language=en&page_size=5"
+            cur_intl_url = "https://api.currentsapi.services/v1/latest-news?language=en&page_size=20"
             cur_intl_res = requests.get(cur_intl_url, headers=headers, timeout=10)
             cur_intl_data = cur_intl_res.json()
             if cur_intl_res.status_code == 200 and cur_intl_data.get("status") == "ok":
@@ -159,12 +204,12 @@ def fetch_all_sources():
         for url in urls:
             try:
                 feed = feedparser.parse(url)
-                for entry in feed.entries[:6]:
+                for entry in feed.entries[:20]:
                     title = getattr(entry, 'title', 'No Title')
                     link = getattr(entry, 'link', '#')
                     summary = getattr(entry, 'summary', '') or getattr(entry, 'description', '')
 
-                    item_obj = {"title": title, "url": link, "desc": summary}
+                    item_obj = {"title": title, "url": link, "desc": summary, "trusted": True}
                     if category == "National":
                         national_items.append(item_obj)
                     else:
@@ -177,7 +222,7 @@ def fetch_all_sources():
     if not international_items:
         international_items.append({"title": "International Relations & Global Geopolitics", "url": "https://www.bbc.com/news/world", "desc": "Transnational agreements, global economic shifts, and diplomatic summits."})
 
-    return national_items[:5], international_items[:5]  # Capped at 5 each for optimal generation speed
+    return select_top(national_items, NATIONAL_LIMIT), select_top(international_items, INTERNATIONAL_LIMIT)
 
 
 nat_news, intl_news = fetch_all_sources()
@@ -214,6 +259,29 @@ def colorize_text(text):
     return "".join(out)
 
 
+def generate_analysis(prompt, fallback_html, attempts=4):
+    """Call Groq with retries/backoff so rate limits don't degrade content quality."""
+    for attempt in range(1, attempts + 1):
+        try:
+            response = client.chat.completions.create(
+                model="openai/gpt-oss-120b",
+                messages=[
+                    {"role": "system", "content": SYSTEM_PROMPT},
+                    {"role": "user", "content": prompt}
+                ],
+                temperature=0.3  # lower = fewer invented facts
+            )
+            content = (response.choices[0].message.content or "").replace("```html", "").replace("```", "").strip()
+            if content:
+                return content
+            raise ValueError("Empty response from model")
+        except Exception as e:
+            wait = 5 * attempt
+            print(f"Groq attempt {attempt}/{attempts} failed: {e}. Retrying in {wait}s...")
+            time.sleep(wait)
+    return fallback_html
+
+
 def process_items_with_deep_dives(items, category_name, date_iso_str):
     html_cards = ""
 
@@ -235,25 +303,17 @@ News Details: {safe_desc}
 {PILLAR_SCHEMAS[category_name]}
 """
 
-        try:
-            response = client.chat.completions.create(
-                model="openai/gpt-oss-120b",
-                messages=[
-                    {"role": "system", "content": SYSTEM_PROMPT},
-                    {"role": "user", "content": prompt}
-                ],
-                temperature=0.3  # lower = fewer invented facts
-            )
-            explanation_html = response.choices[0].message.content.replace("```html", "").replace("```", "").strip()
-        except Exception as e:
-            print(f"Error calling Groq for deep dive: {e}")
-            explanation_html = f"<div class='explanation-body'><p>{safe_desc}</p></div>"
+        explanation_html = generate_analysis(
+            prompt,
+            f"<div class='explanation-body'><p>{safe_desc}</p></div>"
+        )
 
         # Colorize summary and explanation (safe: skips tags and .badge spans)
         colored_desc = colorize_text(safe_desc)
         explanation_html = colorize_text(explanation_html)
 
-        subpage_filename = f"{category_name.lower()}_{idx}.html"
+        story_id = hashlib.md5(safe_url.encode("utf-8")).hexdigest()[:8]
+        subpage_filename = f"{category_name.lower()}_{story_id}.html"
         subpage_path = f"public/archive/{date_iso_str}/{subpage_filename}"
         relative_link_to_subpage = f"{date_iso_str}/{subpage_filename}"
 
