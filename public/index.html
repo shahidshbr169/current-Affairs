@@ -1,72 +1,54 @@
-
 <!DOCTYPE html>
-<html lang="en">
+<html lang="en" data-theme="light">
 <head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>UPSC Civil Services - Current Affairs Portal</title>
-    <style>
-        :root {
-            --primary: #2563eb;
-            --primary-light: #eff6ff;
-            --secondary: #0f172a;
-            --bg-color: #f8fafc;
-            --card-bg: #ffffff;
-            --text-main: #334155;
-            --border-color: #e2e8f0;
-        }
-        body {
-            font-family: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
-            max-width: 900px;
-            margin: 40px auto;
-            padding: 0 20px;
-            background-color: var(--bg-color);
-            color: var(--text-main);
-            line-height: 1.6;
-        }
-        .container {
-            background: var(--card-bg);
-            padding: 45px;
-            border-radius: 12px;
-            box-shadow: 0 4px 25px rgba(0,0,0,0.04);
-            border: 1px solid var(--border-color);
-        }
-        h1 { color: var(--secondary); border-bottom: 3px solid var(--primary); padding-bottom: 12px; margin-top: 0; }
-        ul { list-style-type: none; padding: 0; }
-        li {
-            margin: 15px 0;
-            padding: 18px 20px;
-            background: #ffffff;
-            border: 1px solid var(--border-color);
-            border-left: 5px solid var(--primary);
-            border-radius: 8px;
-            transition: all 0.2s ease;
-        }
-        li:hover {
-            transform: translateY(-2px);
-            box-shadow: 0 6px 15px rgba(0,0,0,0.05);
-            border-color: #cbd5e1;
-        }
-        a {
-            color: var(--primary);
-            text-decoration: none;
-            font-size: 1.05rem;
-            font-weight: 600;
-            display: block;
-        }
-        a:hover { text-decoration: underline; }
-        .subtitle { color: #64748b; font-size: 1.05rem; margin-bottom: 30px; }
-    </style>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>UPSC Current Affairs · Daily Briefings &amp; Archive</title>
+<meta name="description" content="Daily UPSC Civil Services current affairs with syllabus mapping, prelims pointers and mains analysis.">
+<link rel="preconnect" href="https://fonts.googleapis.com"><link rel="preconnect" href="https://fonts.gstatic.com" crossorigin><link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Source+Serif+4:opsz,wght@8..60,400;8..60,600;8..60,700&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="assets/style.css">
+<script src="assets/site.js"></script>
 </head>
 <body>
-    <div class="container">
-        <h1>🏛️ UPSC / IAS Current Affairs Portal</h1>
-        <p class="subtitle">Multi-source hybrid intelligence featuring dedicated full-fledged deep-dive explanations for civil services aspirants.</p>
-        <h2>Comprehensive Archive Index</h2>
-        <ul>
-            <li><a href="archive/2026-11-05.html">📚 UPSC Edition – <strong>2026-11-05</strong> <span style="float:right; color:#64748b; font-size:0.9rem; font-weight:normal;">View Portal →</span></a></li>
-
-        </ul>
+<header class="topbar"><div class="topbar-inner">
+  <a class="brand" href="index.html"><span class="brand-mark">🏛️</span><span>UPSC Current Affairs</span></a>
+  <nav class="nav">
+    <a class="hide-sm" href="index.html#archive">Archive</a>
+    <button class="icon-btn" id="theme-toggle" type="button" aria-label="Toggle dark mode" title="Toggle theme">🌙</button>
+  </nav>
+</div></header>
+<main class="wrap">
+  <section class="hero">
+    <p class="eyebrow">Civil Services · Daily Briefing</p>
+    <h1>UPSC Current Affairs</h1>
+    <p class="lead">National governance and international relations news, mapped to the GS syllabus with prelims pointers and mains perspectives.</p>
+  </section>
+  
+  <section class="featured">
+    <div>
+      <p class="eyebrow">Latest edition</p>
+      <h2>6 November 2026</h2>
+      <p>Friday · 10 national · 10 international</p>
     </div>
+    <a class="btn" href="archive/2026-11-06.html">Read today's briefing →</a>
+  </section>
+  <section id="archive">
+    <div class="section-head">
+      <h2>Archive</h2>
+      <input class="search" id="archive-search" type="search" placeholder="Search by date or month…" aria-label="Search archive">
+    </div>
+    <section class="month-group"><h3 class="month">November 2026</h3><div class="edition-grid">
+      <a class="edition" href="archive/2026-11-06.html" data-date="2026-11-06 November 2026 6 Friday">
+        <div class="edition-date"><span class="edition-day">6</span><span class="edition-mon">Nov</span></div>
+        <div class="edition-info"><strong>Friday</strong><span>10 national · 10 international</span></div>
+      </a>
+      <a class="edition" href="archive/2026-11-05.html" data-date="2026-11-05 November 2026 5 Thursday">
+        <div class="edition-date"><span class="edition-day">5</span><span class="edition-mon">Nov</span></div>
+        <div class="edition-info"><strong>Thursday</strong><span>Daily briefing</span></div>
+      </a></div></section>
+
+  </section>
+</main>
+<footer class="footer">AI-assisted summaries built from public news feeds. Always verify facts against official sources and standard references.</footer>
 </body>
 </html>
