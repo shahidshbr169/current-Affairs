@@ -2,6 +2,8 @@ import os
 import re
 import time
 import hashlib
+import json
+import html as html_lib
 from datetime import datetime
 import requests
 import feedparser
@@ -235,7 +237,7 @@ client = OpenAI(
 # Dates first, then numbers/statistics (one pass so matches never overlap)
 BADGE_PATTERN = re.compile(
     r'\b(20\d{2}|January|February|March|April|May|June|July|August|September|October|November|December)\b'
-    r'|\b(\d+(?:\.\d+)?(?:%|rd|th|st|nd| crore| lakh| billion| million)?)\b'
+    r'|\b(\d+(?:\.\d+)?(?:%|(?:rd|th|st|nd| crore| lakh| billion| million)\b)?)(?!\w)'
 )
 
 
@@ -282,375 +284,537 @@ def generate_analysis(prompt, fallback_html, attempts=4):
     return fallback_html
 
 
-def process_items_with_deep_dives(items, category_name, date_iso_str):
-    html_cards = ""
+def clean_text(raw):
+    """Strip HTML tags/entities from feed text so cards read cleanly."""
+    text = re.sub(r'<[^>]+>', ' ', raw or '')
+    text = html_lib.unescape(text)
+    return re.sub(r'\s+', ' ', text).strip()
 
-    os.makedirs(f"public/archive/{date_iso_str}", exist_ok=True)
 
+def trim_text(text, limit=320):
+    if len(text) <= limit:
+        return text
+    cut = text[:limit].rsplit(' ', 1)[0].rstrip(' ,;:-')
+    return cut + '…'
+
+
+def esc(text):
+    return html_lib.escape(text, quote=False)
+
+
+def esc_attr(text):
+    return html_lib.escape(text, quote=True)
+
+
+def pretty_date(dt):
+    return f"{dt.day} {dt.strftime('%B %Y')}"
+
+
+# ---------------------------------------------------------------------------
+# SITE ASSETS (written once per run to public/assets/)
+# ---------------------------------------------------------------------------
+SITE_CSS = """
+:root{
+  --bg:#f5f6f8; --surface:#ffffff; --surface-2:#eef2f7; --text:#243044; --muted:#6b7686;
+  --heading:#0b1a33; --border:#e1e6ee; --accent:#1e4fd8; --accent-ink:#ffffff; --accent-soft:#e9efff;
+  --nat:#1e4fd8; --nat-soft:#e9efff; --intl:#0e7490; --intl-soft:#def3f8;
+  --shadow:0 1px 2px rgba(15,23,42,.04),0 10px 28px rgba(15,23,42,.06);
+  --sans:'Inter',system-ui,-apple-system,'Segoe UI',Roboto,sans-serif;
+  --serif:'Source Serif 4',Georgia,'Times New Roman',serif;
+  --radius:14px;
+}
+[data-theme="dark"]{
+  --bg:#0d1320; --surface:#151d2e; --surface-2:#1b2538; --text:#d3dbe8; --muted:#8e9bb0;
+  --heading:#f2f5fb; --border:#27324a; --accent:#6d9bff; --accent-ink:#0b1220; --accent-soft:#1d2c52;
+  --nat:#7aa5ff; --nat-soft:#1d2c52; --intl:#52c7de; --intl-soft:#12333c;
+  --shadow:0 1px 2px rgba(0,0,0,.3),0 10px 28px rgba(0,0,0,.35);
+}
+*{box-sizing:border-box}
+html{scroll-behavior:smooth}
+body{margin:0;background:var(--bg);color:var(--text);font-family:var(--sans);line-height:1.6;-webkit-font-smoothing:antialiased;text-rendering:optimizeLegibility}
+a{color:var(--accent);text-decoration:none}
+a:hover{text-decoration:underline}
+img{max-width:100%}
+
+/* ---------- layout ---------- */
+.wrap{max-width:1040px;margin:0 auto;padding:32px 20px 72px}
+.wrap.narrow{max-width:760px}
+.topbar{position:sticky;top:0;z-index:20;background:var(--surface);background:color-mix(in srgb,var(--surface) 88%,transparent);-webkit-backdrop-filter:blur(10px);backdrop-filter:blur(10px);border-bottom:1px solid var(--border)}
+.topbar-inner{max-width:1040px;margin:0 auto;padding:12px 20px;display:flex;align-items:center;justify-content:space-between;gap:16px}
+.brand{display:flex;align-items:center;gap:10px;font-weight:700;color:var(--heading);letter-spacing:-.01em}
+.brand:hover{text-decoration:none}
+.brand-mark{display:grid;place-items:center;width:32px;height:32px;border-radius:9px;background:var(--accent);color:var(--accent-ink);font-size:16px}
+.nav{display:flex;align-items:center;gap:6px}
+.nav a{color:var(--muted);font-weight:500;font-size:.92rem;padding:6px 10px;border-radius:8px}
+.nav a:hover{background:var(--surface-2);color:var(--heading);text-decoration:none}
+.icon-btn{border:1px solid var(--border);background:var(--surface);color:var(--text);width:36px;height:36px;border-radius:10px;cursor:pointer;font-size:15px}
+.icon-btn:hover{background:var(--surface-2)}
+.progress{position:fixed;top:0;left:0;height:3px;width:0;background:var(--accent);z-index:30}
+.crumbs{font-size:.85rem;color:var(--muted);margin-bottom:22px}
+.crumbs span{margin:0 4px}
+.footer{border-top:1px solid var(--border);padding:26px 20px;text-align:center;color:var(--muted);font-size:.85rem}
+
+/* ---------- headings & hero ---------- */
+.eyebrow{margin:0 0 8px;font-size:.78rem;font-weight:700;letter-spacing:.12em;text-transform:uppercase;color:var(--accent)}
+.hero{padding:18px 0 28px}
+.hero h1,.page-head h1{margin:0 0 12px;font-family:var(--serif);font-size:2.8rem;line-height:1.12;letter-spacing:-.02em;color:var(--heading)}
+.lead{margin:0;max-width:640px;font-size:1.1rem;color:var(--muted)}
+.page-head{padding:6px 0 22px}
+.chips{display:flex;flex-wrap:wrap;gap:10px;margin-top:20px}
+.chip{display:inline-block;padding:8px 14px;border-radius:999px;font-size:.88rem;font-weight:600;border:1px solid var(--border);background:var(--surface);color:var(--heading)}
+.chip:hover{text-decoration:none;border-color:var(--accent)}
+.chip-national{border-left:4px solid var(--nat)}
+.chip-international{border-left:4px solid var(--intl)}
+.section-title{margin:44px 0 18px;font-size:1.25rem;font-weight:700;color:var(--heading);display:flex;align-items:center;gap:12px;letter-spacing:-.01em}
+.section-title::before{content:"";width:5px;height:24px;border-radius:3px;background:var(--accent)}
+.section-title.nat::before{background:var(--nat)}
+.section-title.intl::before{background:var(--intl)}
+.section-head{display:flex;align-items:center;justify-content:space-between;gap:16px;flex-wrap:wrap;margin:40px 0 4px}
+.section-head h2{margin:0;font-size:1.4rem;color:var(--heading)}
+.search{padding:10px 14px;min-width:240px;border:1px solid var(--border);border-radius:10px;background:var(--surface);color:var(--text);font:inherit;font-size:.92rem}
+.search:focus{outline:2px solid var(--accent);outline-offset:1px}
+
+/* ---------- buttons & tags ---------- */
+.btn{display:inline-block;padding:10px 18px;border-radius:10px;font-weight:600;font-size:.92rem;border:1px solid transparent;cursor:pointer}
+.btn:hover{text-decoration:none}
+.btn-sm{padding:7px 14px;font-size:.85rem}
+.btn-primary{background:var(--accent);color:var(--accent-ink)}
+.btn-primary:hover{filter:brightness(1.08)}
+.btn-ghost{background:transparent;color:var(--text);border-color:var(--border)}
+.btn-ghost:hover{background:var(--surface-2)}
+.tag{display:inline-block;font-size:.72rem;font-weight:700;letter-spacing:.08em;text-transform:uppercase;padding:4px 10px;border-radius:999px}
+.tag-national{background:var(--nat-soft);color:var(--nat)}
+.tag-international{background:var(--intl-soft);color:var(--intl)}
+
+/* ---------- index ---------- */
+.featured{display:flex;justify-content:space-between;align-items:center;gap:24px;padding:30px;border-radius:18px;background:linear-gradient(135deg,#102349,#1e4fd8);color:#fff;box-shadow:var(--shadow)}
+.featured .eyebrow{color:#b9ccff}
+.featured h2{margin:0 0 6px;font-family:var(--serif);font-size:1.9rem;line-height:1.2}
+.featured p{margin:0;color:#d6e0ff}
+.featured .btn{background:#fff;color:#102349;white-space:nowrap}
+.month{margin:30px 0 12px;font-size:.78rem;text-transform:uppercase;letter-spacing:.12em;color:var(--muted);font-weight:700}
+.edition-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(270px,1fr));gap:14px}
+.edition{display:flex;align-items:center;gap:14px;padding:14px 16px;background:var(--surface);border:1px solid var(--border);border-radius:12px;color:var(--text);transition:transform .15s,border-color .15s}
+.edition:hover{text-decoration:none;transform:translateY(-2px);border-color:var(--accent)}
+.edition-date{display:flex;flex-direction:column;align-items:center;justify-content:center;min-width:52px;height:56px;border-radius:10px;background:var(--accent-soft);color:var(--accent);line-height:1}
+.edition-day{font-family:var(--serif);font-size:1.5rem;font-weight:700}
+.edition-mon{font-size:.68rem;font-weight:700;letter-spacing:.1em;text-transform:uppercase;margin-top:3px}
+.edition-info strong{display:block;color:var(--heading);font-size:.98rem}
+.edition-info span{font-size:.82rem;color:var(--muted)}
+
+/* ---------- story cards (daily page) ---------- */
+.story{display:flex;gap:20px;padding:24px;background:var(--surface);border:1px solid var(--border);border-radius:var(--radius);box-shadow:var(--shadow);margin-bottom:16px;transition:transform .15s,border-color .15s}
+.story:hover{transform:translateY(-2px);border-color:var(--accent)}
+.story-num{flex:0 0 auto;min-width:38px;font-family:var(--serif);font-size:1.7rem;font-weight:700;line-height:1.2;color:var(--nat)}
+.story.international .story-num{color:var(--intl)}
+.story h3{margin:0 0 10px;font-family:var(--serif);font-size:1.32rem;line-height:1.3;letter-spacing:-.005em}
+.story h3 a{color:var(--heading)}
+.story h3 a:hover{color:var(--accent);text-decoration:none}
+.summary{margin:0 0 16px;font-size:1rem;line-height:1.7;color:var(--text)}
+.story-actions{display:flex;flex-wrap:wrap;gap:10px}
+
+/* ---------- article (analysis page) ---------- */
+.article header{margin-bottom:30px}
+.article h1{font-family:var(--serif);font-size:2.25rem;line-height:1.2;letter-spacing:-.015em;color:var(--heading);margin:14px 0 14px}
+.meta{display:flex;flex-wrap:wrap;align-items:center;gap:8px;color:var(--muted);font-size:.9rem}
+.meta .dot{opacity:.5}
+.explanation-body{font-family:var(--serif);font-size:1.14rem;line-height:1.8;color:var(--text)}
+.explanation-body p{margin:0 0 16px;padding:16px 20px;background:var(--surface);border:1px solid var(--border);border-left:4px solid var(--accent);border-radius:10px}
+.explanation-body > p:first-child{font-size:1.2rem;border-left-color:var(--nat)}
+.explanation-body p strong{display:block;margin-bottom:6px;font-family:var(--sans);font-size:.72rem;font-weight:700;letter-spacing:.09em;text-transform:uppercase;color:var(--accent)}
+.explanation-body h4{margin:38px 0 14px;padding-bottom:10px;border-bottom:1px solid var(--border);font-family:var(--sans);font-size:.8rem;font-weight:700;letter-spacing:.1em;text-transform:uppercase;color:var(--muted)}
+.explanation-body ul{list-style:none;margin:0 0 8px;padding:0;display:grid;gap:12px}
+.explanation-body li{padding:14px 18px;background:var(--surface);border:1px solid var(--border);border-radius:10px;line-height:1.7}
+.explanation-body li em{display:block;margin-bottom:4px;font-style:normal;font-family:var(--sans);font-size:.74rem;font-weight:700;letter-spacing:.07em;text-transform:uppercase;color:var(--accent)}
+.actions{margin-top:30px}
+.pager{display:grid;grid-template-columns:1fr 1fr;gap:14px;margin-top:44px}
+.pager a{display:block;padding:16px 18px;background:var(--surface);border:1px solid var(--border);border-radius:12px;color:var(--heading);font-weight:600;font-size:.95rem;line-height:1.4}
+.pager a:hover{text-decoration:none;border-color:var(--accent)}
+.pager small{display:block;margin-bottom:4px;color:var(--muted);font-size:.72rem;font-weight:700;letter-spacing:.08em;text-transform:uppercase}
+.pager .next{text-align:right}
+
+/* ---------- highlight badges ---------- */
+.badge{display:inline-block;margin:2px 4px 2px 0;padding:1px 10px;border-radius:999px;background:#fff4d6;color:#8a4b00;border:1px solid #f3dc9c;font-family:var(--sans);font-size:.88rem;font-weight:600;line-height:1.6}
+.badge-num{padding:0 5px;border-radius:5px;background:#e6eeff;color:#1e40af;font-weight:600}
+.badge-date{padding:0 5px;border-radius:5px;background:#fff0dd;color:#b45309;font-weight:600}
+[data-theme="dark"] .badge{background:#3a2d0c;color:#f6cf75;border-color:#5a4513}
+[data-theme="dark"] .badge-num{background:#1d2c52;color:#9db9ff}
+[data-theme="dark"] .badge-date{background:#3a2a10;color:#f3b86a}
+
+/* ---------- responsive & print ---------- */
+@media (max-width:640px){
+  .wrap{padding:24px 16px 56px}
+  .hero h1,.page-head h1{font-size:2.1rem}
+  .article h1{font-size:1.7rem}
+  .explanation-body{font-size:1.05rem}
+  .story{flex-direction:column;gap:8px;padding:20px}
+  .featured{flex-direction:column;align-items:flex-start;padding:24px}
+  .pager{grid-template-columns:1fr}
+  .pager .next{text-align:left}
+  .nav a.hide-sm{display:none}
+  .search{width:100%}
+}
+@media print{
+  .topbar,.progress,.pager,.actions,.footer{display:none}
+  body{background:#fff}
+  .explanation-body p,.explanation-body li{break-inside:avoid}
+}
+"""
+
+SITE_JS = """
+(function () {
+  var root = document.documentElement, key = 'upsc-theme', saved = null;
+  try { saved = localStorage.getItem(key); } catch (e) {}
+  var prefersDark = window.matchMedia && window.matchMedia('(prefers-color-scheme: dark)').matches;
+  root.setAttribute('data-theme', saved || (prefersDark ? 'dark' : 'light'));
+
+  document.addEventListener('DOMContentLoaded', function () {
+    var btn = document.getElementById('theme-toggle');
+    function label() { if (btn) btn.textContent = root.getAttribute('data-theme') === 'dark' ? '☀️' : '🌙'; }
+    if (btn) {
+      label();
+      btn.addEventListener('click', function () {
+        var next = root.getAttribute('data-theme') === 'dark' ? 'light' : 'dark';
+        root.setAttribute('data-theme', next);
+        try { localStorage.setItem(key, next); } catch (e) {}
+        label();
+      });
+    }
+
+    var bar = document.getElementById('progress');
+    if (bar) {
+      window.addEventListener('scroll', function () {
+        var h = document.documentElement;
+        var total = h.scrollHeight - h.clientHeight;
+        bar.style.width = (total > 0 ? (h.scrollTop / total) * 100 : 0) + '%';
+      }, { passive: true });
+    }
+
+    var q = document.getElementById('archive-search');
+    if (q) {
+      q.addEventListener('input', function () {
+        var v = q.value.trim().toLowerCase();
+        document.querySelectorAll('.edition').forEach(function (el) {
+          var hit = el.getAttribute('data-date').toLowerCase().indexOf(v) > -1;
+          el.style.display = hit ? '' : 'none';
+        });
+        document.querySelectorAll('.month-group').forEach(function (g) {
+          var visible = Array.prototype.some.call(g.querySelectorAll('.edition'), function (el) {
+            return el.style.display !== 'none';
+          });
+          g.style.display = visible ? '' : 'none';
+        });
+      });
+    }
+  });
+})();
+"""
+
+FONTS_LINK = (
+    '<link rel="preconnect" href="https://fonts.googleapis.com">'
+    '<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>'
+    '<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700'
+    '&family=Source+Serif+4:opsz,wght@8..60,400;8..60,600;8..60,700&display=swap" rel="stylesheet">'
+)
+
+FOOTER = '<footer class="footer">AI-assisted summaries built from public news feeds. Always verify facts against official sources and standard references.</footer>'
+
+
+def write_assets():
+    os.makedirs("public/assets", exist_ok=True)
+    with open("public/assets/style.css", "w", encoding="utf-8") as f:
+        f.write(SITE_CSS)
+    with open("public/assets/site.js", "w", encoding="utf-8") as f:
+        f.write(SITE_JS)
+
+
+def page_head(title, description, root):
+    return f"""<!DOCTYPE html>
+<html lang="en" data-theme="light">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>{esc(title)}</title>
+<meta name="description" content="{esc_attr(description)}">
+{FONTS_LINK}
+<link rel="stylesheet" href="{root}assets/style.css">
+<script src="{root}assets/site.js"></script>
+</head>"""
+
+
+def topbar(root):
+    return f"""<header class="topbar"><div class="topbar-inner">
+  <a class="brand" href="{root}index.html"><span class="brand-mark">🏛️</span><span>UPSC Current Affairs</span></a>
+  <nav class="nav">
+    <a class="hide-sm" href="{root}index.html#archive">Archive</a>
+    <button class="icon-btn" id="theme-toggle" type="button" aria-label="Toggle dark mode" title="Toggle theme">🌙</button>
+  </nav>
+</div></header>"""
+
+
+# ---------------------------------------------------------------------------
+# CONTENT GENERATION
+# ---------------------------------------------------------------------------
+def build_stories(items, category_name):
+    stories = []
     for idx, item in enumerate(items):
-        safe_title = item['title']
-        safe_url = item['url']
-        safe_desc = item['desc']
+        title = clean_text(item['title']) or "Untitled"
+        desc = clean_text(item['desc'])
+        url = item['url'] or "#"
 
-        print(f"Generating full-fledged explanation for [{category_name}] item {idx+1}: {safe_title[:40]}...")
+        print(f"Generating full-fledged explanation for [{category_name}] item {idx+1}: {title[:40]}...")
 
         prompt = f"""
 Process the following raw news item for the {category_name} pillar.
 
-News Title: {safe_title}
-News Details: {safe_desc}
+News Title: {title}
+News Details: {desc}
 
 {PILLAR_SCHEMAS[category_name]}
 """
+        fallback = f"<div class='explanation-body'><p>{esc(desc or title)}</p></div>"
+        explanation = generate_analysis(prompt, fallback)
+        explanation = re.sub(r'<script.*?</script>', '', explanation, flags=re.S | re.I)
 
-        explanation_html = generate_analysis(
-            prompt,
-            f"<div class='explanation-body'><p>{safe_desc}</p></div>"
-        )
+        words = len(re.sub(r'<[^>]+>', ' ', explanation).split())
+        minutes = max(1, round(words / 200))
+        explanation = colorize_text(explanation)
 
-        # Colorize summary and explanation (safe: skips tags and .badge spans)
-        colored_desc = colorize_text(safe_desc)
-        explanation_html = colorize_text(explanation_html)
+        # Stable file name derived from the story URL (title only if there is no URL)
+        key = url if url not in ("", "#") else title
+        story_id = hashlib.md5(key.encode("utf-8")).hexdigest()[:8]
 
-        story_id = hashlib.md5(safe_url.encode("utf-8")).hexdigest()[:8]
-        subpage_filename = f"{category_name.lower()}_{story_id}.html"
-        subpage_path = f"public/archive/{date_iso_str}/{subpage_filename}"
-        relative_link_to_subpage = f"{date_iso_str}/{subpage_filename}"
-
-        # Build Card HTML for the main daily page
-        html_cards += f"""
-        <li>
-            <strong>{safe_title}</strong>
-            <p>{colored_desc}</p>
-            <div style="margin-top: 15px;">
-                <a class="btn-readmore" href="{relative_link_to_subpage}">📖 Read Full UPSC Analysis →</a>
-                <a class="source-link" href="{safe_url}" target="_blank">🔗 Original Source</a>
-            </div>
-        </li>
-        """
-
-        # Build Subpage HTML
-        subpage_html = f"""
-        <!DOCTYPE html>
-        <html lang="en">
-        <head>
-            <meta charset="UTF-8">
-            <meta name="viewport" content="width=device-width, initial-scale=1.0">
-            <title>{safe_title} - UPSC Analysis</title>
-            <style>
-                :root {{
-                    --primary: #2563eb;
-                    --primary-light: #eff6ff;
-                    --secondary: #0f172a;
-                    --bg-color: #f8fafc;
-                    --card-bg: #ffffff;
-                    --text-main: #334155;
-                    --border-color: #e2e8f0;
-                }}
-                body {{
-                    font-family: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
-                    max-width: 900px;
-                    margin: 0 auto;
-                    padding: 20px;
-                    background-color: var(--bg-color);
-                    color: var(--text-main);
-                    line-height: 1.8;
-                }}
-                .card {{
-                    background: var(--card-bg);
-                    padding: 45px;
-                    border-radius: 12px;
-                    box-shadow: 0 4px 25px rgba(0,0,0,0.04);
-                    border: 1px solid var(--border-color);
-                }}
-                h1 {{ color: var(--secondary); font-size: 1.8rem; margin-top: 10px; }}
-                .back-link {{
-                    display: inline-block;
-                    margin-bottom: 20px;
-                    color: var(--primary);
-                    text-decoration: none;
-                    font-weight: 600;
-                }}
-                .back-link:hover {{ text-decoration: underline; }}
-                .badge-num {{ background: #dbeafe; color: #1e40af; padding: 2px 6px; border-radius: 4px; font-weight: 600; }}
-                .badge-date {{ background: #ffedd5; color: #c2410c; padding: 2px 6px; border-radius: 4px; font-weight: 600; }}
-                .badge {{ background: #fef3c7; color: #92400e; padding: 2px 8px; border-radius: 4px; font-weight: 600; border: 1px solid #fde68a; }}
-                .explanation-body p {{ margin: 10px 0; }}
-                .explanation-body h4 {{ color: var(--primary); margin-top: 25px; }}
-                .explanation-body ul {{ padding-left: 20px; }}
-                .explanation-body li {{ margin-bottom: 10px; }}
-                .source-btn {{
-                    display: inline-block;
-                    margin-top: 30px;
-                    background: var(--primary);
-                    color: white;
-                    padding: 10px 20px;
-                    border-radius: 8px;
-                    text-decoration: none;
-                    font-weight: 600;
-                }}
-                .source-btn:hover {{ background: #1d4ed8; }}
-            </style>
-        </head>
-        <body>
-            <div class="card">
-                <a class="back-link" href="../{date_iso_str}.html">← Back to Daily Briefing</a>
-                <span style="font-size: 0.85rem; background: var(--primary-light); color: var(--primary); padding: 4px 10px; border-radius: 20px; font-weight: 600;">{category_name} Analysis</span>
-                <h1>{safe_title}</h1>
-                <hr style="border:0; border-top:1px solid var(--border-color); margin: 25px 0;">
-                {explanation_html}
-                <br>
-                <a class="source-btn" href="{safe_url}" target="_blank">🔗 Visit Original Web Source</a>
-            </div>
-        </body>
-        </html>
-        """
-
-        with open(subpage_path, "w", encoding="utf-8") as sf:
-            sf.write(subpage_html)
-
-    return html_cards
+        stories.append({
+            "title": title,
+            "desc": desc,
+            "url": url,
+            "html": explanation,
+            "minutes": minutes,
+            "filename": f"{category_name.lower()}_{story_id}.html",
+        })
+    return stories
 
 
-# Setup Archive and Today's Dates
-current_date_iso = datetime.now().strftime("%Y-%m-%d")
-current_date_formatted = datetime.now().strftime("%B %d, %Y")
+# ---------------------------------------------------------------------------
+# PAGE WRITERS
+# ---------------------------------------------------------------------------
+def write_subpages(stories, category_name, date_iso, dt):
+    folder = f"public/archive/{date_iso}"
+    os.makedirs(folder, exist_ok=True)
+    cls = category_name.lower()
+    pretty = pretty_date(dt)
+
+    for i, s in enumerate(stories):
+        prev_s = stories[i - 1] if i > 0 else None
+        next_s = stories[i + 1] if i < len(stories) - 1 else None
+
+        if prev_s:
+            prev_html = f'<a class="prev" href="{prev_s["filename"]}"><small>← Previous</small>{esc(trim_text(prev_s["title"], 90))}</a>'
+        else:
+            prev_html = '<span></span>'
+        if next_s:
+            next_html = f'<a class="next" href="{next_s["filename"]}"><small>Next →</small>{esc(trim_text(next_s["title"], 90))}</a>'
+        else:
+            next_html = '<span></span>'
+
+        page = page_head(f"{s['title']} · UPSC Current Affairs", trim_text(s['desc'] or s['title'], 160), "../../") + f"""
+<body>
+<div class="progress" id="progress"></div>
+{topbar('../../')}
+<main class="wrap narrow">
+  <nav class="crumbs"><a href="../../index.html">Archive</a><span>›</span><a href="../{date_iso}.html">{pretty}</a><span>›</span>{category_name}</nav>
+  <article class="article">
+    <header>
+      <span class="tag tag-{cls}">{category_name}</span>
+      <h1>{esc(s['title'])}</h1>
+      <div class="meta"><span>{pretty}</span><span class="dot">•</span><span>{s['minutes']} min read</span></div>
+    </header>
+    {s['html']}
+    <div class="actions"><a class="btn btn-primary" href="{esc_attr(s['url'])}" target="_blank" rel="noopener">Read original source ↗</a></div>
+  </article>
+  <nav class="pager">{prev_html}{next_html}</nav>
+</main>
+{FOOTER}
+</body>
+</html>"""
+
+        with open(f"{folder}/{s['filename']}", "w", encoding="utf-8") as f:
+            f.write(page)
+
+
+def render_cards(stories, category_name, date_iso):
+    cls = category_name.lower()
+    out = ""
+    for i, s in enumerate(stories, 1):
+        summary = ""
+        if s['desc']:
+            summary = f'<p class="summary">{colorize_text(esc(trim_text(s["desc"])))}</p>'
+        href = f"{date_iso}/{s['filename']}"
+        out += f"""
+    <article class="story {cls}">
+      <div class="story-num">{i:02d}</div>
+      <div class="story-body">
+        <h3><a href="{href}">{esc(s['title'])}</a></h3>
+        {summary}
+        <div class="story-actions">
+          <a class="btn btn-primary btn-sm" href="{href}">Read analysis →</a>
+          <a class="btn btn-ghost btn-sm" href="{esc_attr(s['url'])}" target="_blank" rel="noopener">Source ↗</a>
+        </div>
+      </div>
+    </article>"""
+    return out
+
+
+def write_daily_page(date_iso, dt, national, international):
+    pretty = pretty_date(dt)
+    weekday = dt.strftime("%A")
+    nat_cards = render_cards(national, "National", date_iso)
+    intl_cards = render_cards(international, "International", date_iso)
+
+    page = page_head(f"UPSC Current Affairs · {pretty}",
+                     f"Daily UPSC current affairs for {pretty}: national governance and international relations, mapped to the syllabus.",
+                     "../") + f"""
+<body>
+{topbar('../')}
+<main class="wrap">
+  <nav class="crumbs"><a href="../index.html">Archive</a><span>›</span>{pretty}</nav>
+  <header class="page-head">
+    <p class="eyebrow">{weekday} · Daily Briefing</p>
+    <h1>{pretty}</h1>
+    <p class="lead">Syllabus-mapped analysis with prelims pointers and mains perspectives.</p>
+    <div class="chips">
+      <a class="chip chip-national" href="#national">🇮🇳 National &amp; Governance · {len(national)}</a>
+      <a class="chip chip-international" href="#international">🌍 International Relations · {len(international)}</a>
+    </div>
+  </header>
+
+  <section id="national">
+    <h2 class="section-title nat">National News &amp; Governance</h2>
+    {nat_cards}
+  </section>
+
+  <section id="international">
+    <h2 class="section-title intl">International Relations &amp; Global Affairs</h2>
+    {intl_cards}
+  </section>
+</main>
+{FOOTER}
+</body>
+</html>"""
+
+    with open(f"public/archive/{date_iso}.html", "w", encoding="utf-8") as f:
+        f.write(page)
+
+    # Small manifest so the archive index can show accurate story counts
+    with open(f"public/archive/{date_iso}/_meta.json", "w", encoding="utf-8") as f:
+        json.dump({"national": len(national), "international": len(international)}, f)
+
+
+def list_editions():
+    editions = []
+    for name in os.listdir("public/archive"):
+        m = re.fullmatch(r'(\d{4}-\d{2}-\d{2})\.html', name)
+        if not m:
+            continue
+        iso = m.group(1)
+        try:
+            dt = datetime.strptime(iso, "%Y-%m-%d")
+        except ValueError:
+            continue
+        counts = None
+        meta_path = os.path.join("public/archive", iso, "_meta.json")
+        if os.path.isfile(meta_path):
+            try:
+                with open(meta_path, encoding="utf-8") as mf:
+                    counts = json.load(mf)
+            except Exception:
+                counts = None
+        editions.append({"iso": iso, "dt": dt, "counts": counts})
+    editions.sort(key=lambda e: e["iso"], reverse=True)
+    return editions
+
+
+def counts_label(counts):
+    if not counts:
+        return "Daily briefing"
+    return f"{counts.get('national', 0)} national · {counts.get('international', 0)} international"
+
+
+def write_index():
+    editions = list_editions()
+
+    featured = ""
+    if editions:
+        latest = editions[0]
+        featured = f"""
+  <section class="featured">
+    <div>
+      <p class="eyebrow">Latest edition</p>
+      <h2>{pretty_date(latest['dt'])}</h2>
+      <p>{latest['dt'].strftime('%A')} · {counts_label(latest['counts'])}</p>
+    </div>
+    <a class="btn" href="archive/{latest['iso']}.html">Read today's briefing →</a>
+  </section>"""
+
+    groups, current_month, grid = "", None, ""
+    for e in editions:
+        month = e['dt'].strftime("%B %Y")
+        if month != current_month:
+            if current_month is not None:
+                groups += f'<section class="month-group"><h3 class="month">{current_month}</h3><div class="edition-grid">{grid}</div></section>\n'
+            current_month, grid = month, ""
+        search_text = f"{e['iso']} {month} {e['dt'].day} {e['dt'].strftime('%A')}"
+        grid += f"""
+      <a class="edition" href="archive/{e['iso']}.html" data-date="{esc_attr(search_text)}">
+        <div class="edition-date"><span class="edition-day">{e['dt'].day}</span><span class="edition-mon">{e['dt'].strftime('%b')}</span></div>
+        <div class="edition-info"><strong>{e['dt'].strftime('%A')}</strong><span>{counts_label(e['counts'])}</span></div>
+      </a>"""
+    if current_month is not None:
+        groups += f'<section class="month-group"><h3 class="month">{current_month}</h3><div class="edition-grid">{grid}</div></section>\n'
+
+    page = page_head("UPSC Current Affairs · Daily Briefings & Archive",
+                     "Daily UPSC Civil Services current affairs with syllabus mapping, prelims pointers and mains analysis.",
+                     "") + f"""
+<body>
+{topbar('')}
+<main class="wrap">
+  <section class="hero">
+    <p class="eyebrow">Civil Services · Daily Briefing</p>
+    <h1>UPSC Current Affairs</h1>
+    <p class="lead">National governance and international relations news, mapped to the GS syllabus with prelims pointers and mains perspectives.</p>
+  </section>
+  {featured}
+  <section id="archive">
+    <div class="section-head">
+      <h2>Archive</h2>
+      <input class="search" id="archive-search" type="search" placeholder="Search by date or month…" aria-label="Search archive">
+    </div>
+    {groups}
+  </section>
+</main>
+{FOOTER}
+</body>
+</html>"""
+
+    with open("public/index.html", "w", encoding="utf-8") as f:
+        f.write(page)
+
+
+# ---------------------------------------------------------------------------
+# RUN
+# ---------------------------------------------------------------------------
+current_dt = datetime.now()
+current_date_iso = current_dt.strftime("%Y-%m-%d")
 
 os.makedirs("public/archive", exist_ok=True)
+write_assets()
 
-# Process categories with full subpage generation
-national_cards_html = process_items_with_deep_dives(nat_news, "National", current_date_iso)
-international_cards_html = process_items_with_deep_dives(intl_news, "International", current_date_iso)
+national_stories = build_stories(nat_news, "National")
+international_stories = build_stories(intl_news, "International")
 
-combined_ai_content = f"""
-<div class="category-banner">🇮🇳 National News & Governance</div>
-<ul>{national_cards_html}</ul>
+write_subpages(national_stories, "National", current_date_iso, current_dt)
+write_subpages(international_stories, "International", current_date_iso, current_dt)
+write_daily_page(current_date_iso, current_dt, national_stories, international_stories)
+write_index()
 
-<div class="category-banner">🌍 International Relations & Global Affairs</div>
-<ul>{international_cards_html}</ul>
-"""
-
-# Generate Daily HTML Page
-daily_html = f"""
-<!DOCTYPE html>
-<html lang="en">
-<head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>UPSC Current Affairs - {current_date_formatted}</title>
-    <style>
-        :root {{
-            --primary: #2563eb;
-            --primary-light: #eff6ff;
-            --secondary: #0f172a;
-            --bg-color: #f8fafc;
-            --card-bg: #ffffff;
-            --text-main: #334155;
-            --border-color: #e2e8f0;
-        }}
-        body {{
-            font-family: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
-            max-width: 950px;
-            margin: 0 auto;
-            padding: 20px;
-            background-color: var(--bg-color);
-            color: var(--text-main);
-            line-height: 1.7;
-        }}
-        .header-bar {{
-            background: linear-gradient(135deg, #1e293b, #0f172a);
-            color: white;
-            padding: 30px;
-            border-radius: 12px;
-            margin-bottom: 30px;
-            box-shadow: 0 4px 20px rgba(0,0,0,0.08);
-        }}
-        .header-bar h1 {{ margin: 0 0 10px 0; font-size: 2rem; }}
-        .meta-tag {{
-            display: inline-block;
-            background: rgba(255,255,255,0.15);
-            padding: 4px 12px;
-            border-radius: 20px;
-            font-size: 0.85rem;
-            font-weight: 500;
-        }}
-        .back-link {{
-            display: inline-block;
-            margin-bottom: 20px;
-            color: var(--primary);
-            text-decoration: none;
-            font-weight: 600;
-        }}
-        .back-link:hover {{ text-decoration: underline; }}
-        .card {{
-            background: var(--card-bg);
-            padding: 40px;
-            border-radius: 12px;
-            box-shadow: 0 4px 25px rgba(0,0,0,0.04);
-            border: 1px solid var(--border-color);
-        }}
-        .category-banner {{
-            background: var(--primary-light);
-            color: var(--primary);
-            font-size: 1.25rem;
-            font-weight: 700;
-            padding: 12px 20px;
-            border-radius: 8px;
-            margin-top: 40px;
-            margin-bottom: 20px;
-            border-left: 5px solid var(--primary);
-        }}
-        ul {{ padding-left: 0; list-style: none; }}
-        li {{
-            background: #ffffff;
-            border: 1px solid var(--border-color);
-            padding: 24px;
-            border-radius: 8px;
-            margin-bottom: 20px;
-            box-shadow: 0 2px 5px rgba(0,0,0,0.01);
-            transition: transform 0.2s, box-shadow 0.2s;
-        }}
-        li:hover {{
-            transform: translateY(-2px);
-            box-shadow: 0 6px 15px rgba(0,0,0,0.05);
-            border-color: #cbd5e1;
-        }}
-        strong {{ color: var(--secondary); font-size: 1.1rem; display: block; margin-bottom: 8px; }}
-
-        /* Colorful Badges for concentration */
-        .badge-num {{ background: #dbeafe; color: #1e40af; padding: 2px 6px; border-radius: 4px; font-weight: 600; }}
-        .badge-date {{ background: #ffedd5; color: #c2410c; padding: 2px 6px; border-radius: 4px; font-weight: 600; }}
-        .badge {{ background: #fef3c7; color: #92400e; padding: 2px 8px; border-radius: 4px; font-weight: 600; border: 1px solid #fde68a; }}
-
-        .btn-readmore {{
-            display: inline-block;
-            background: var(--primary);
-            color: white;
-            padding: 6px 14px;
-            border-radius: 6px;
-            text-decoration: none;
-            font-size: 0.9rem;
-            font-weight: 600;
-            margin-right: 8px;
-            transition: background 0.2s;
-        }}
-        .btn-readmore:hover {{ background: #1d4ed8; }}
-
-        a.source-link {{
-            display: inline-block;
-            background: var(--primary-light);
-            color: var(--primary);
-            padding: 6px 14px;
-            border-radius: 6px;
-            text-decoration: none;
-            font-size: 0.9rem;
-            font-weight: 600;
-        }}
-        a.source-link:hover {{ background: #dbeafe; }}
-    </style>
-</head>
-<body>
-    <div class="card">
-        <a class="back-link" href="../index.html">← Back to UPSC Archive Index</a>
-
-        <div class="header-bar">
-            <h1>UPSC Daily Current Affairs Briefing</h1>
-            <div class="meta-tag">📅 {current_date_formatted} &nbsp;|&nbsp; 🏛️ Civil Services Examination Prep</div>
-        </div>
-
-        <div class="news-content">
-            {combined_ai_content}
-        </div>
-    </div>
-</body>
-</html>
-"""
-
-daily_filename = f"{current_date_iso}.html"
-with open(f"public/archive/{daily_filename}", "w", encoding="utf-8") as f:
-    f.write(daily_html)
-
-# Generate Index Page
-archive_files = sorted([f for f in os.listdir("public/archive") if os.path.isdir(os.path.join("public/archive", f)) or f.endswith(".html")], reverse=True)
-links_html = ""
-for file in archive_files:
-    if file.endswith(".html"):
-        date_str = file.replace(".html", "")
-        links_html += f'<li><a href="archive/{file}">📚 UPSC Edition – <strong>{date_str}</strong> <span style="float:right; color:#64748b; font-size:0.9rem; font-weight:normal;">View Portal →</span></a></li>\n'
-
-index_html = f"""
-<!DOCTYPE html>
-<html lang="en">
-<head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>UPSC Civil Services - Current Affairs Portal</title>
-    <style>
-        :root {{
-            --primary: #2563eb;
-            --primary-light: #eff6ff;
-            --secondary: #0f172a;
-            --bg-color: #f8fafc;
-            --card-bg: #ffffff;
-            --text-main: #334155;
-            --border-color: #e2e8f0;
-        }}
-        body {{
-            font-family: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
-            max-width: 900px;
-            margin: 40px auto;
-            padding: 0 20px;
-            background-color: var(--bg-color);
-            color: var(--text-main);
-            line-height: 1.6;
-        }}
-        .container {{
-            background: var(--card-bg);
-            padding: 45px;
-            border-radius: 12px;
-            box-shadow: 0 4px 25px rgba(0,0,0,0.04);
-            border: 1px solid var(--border-color);
-        }}
-        h1 {{ color: var(--secondary); border-bottom: 3px solid var(--primary); padding-bottom: 12px; margin-top: 0; }}
-        ul {{ list-style-type: none; padding: 0; }}
-        li {{
-            margin: 15px 0;
-            padding: 18px 20px;
-            background: #ffffff;
-            border: 1px solid var(--border-color);
-            border-left: 5px solid var(--primary);
-            border-radius: 8px;
-            transition: all 0.2s ease;
-        }}
-        li:hover {{
-            transform: translateY(-2px);
-            box-shadow: 0 6px 15px rgba(0,0,0,0.05);
-            border-color: #cbd5e1;
-        }}
-        a {{
-            color: var(--primary);
-            text-decoration: none;
-            font-size: 1.05rem;
-            font-weight: 600;
-            display: block;
-        }}
-        a:hover {{ text-decoration: underline; }}
-        .subtitle {{ color: #64748b; font-size: 1.05rem; margin-bottom: 30px; }}
-    </style>
-</head>
-<body>
-    <div class="container">
-        <h1>🏛️ UPSC / IAS Current Affairs Portal</h1>
-        <p class="subtitle">Multi-source hybrid intelligence featuring dedicated full-fledged deep-dive explanations for civil services aspirants.</p>
-        <h2>Comprehensive Archive Index</h2>
-        <ul>
-            {links_html}
-        </ul>
-    </div>
-</body>
-</html>
-"""
-
-with open("public/index.html", "w", encoding="utf-8") as f:
-    f.write(index_html)
 print("Advanced Modern UPSC portal build script completed successfully.")
